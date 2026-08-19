@@ -44,6 +44,10 @@ unscoped() { field filepath_unscoped.awk "$1"; }
 toolname() { field toolname.awk "$1"; }
 
 fold_p() { # profile-name
+  # SC2018/SC2019 suggest [:upper:]/[:lower:], but PLAN 4.3 forbids them here:
+  # BSD tr is byte-based and multibyte classes can corrupt UTF-8. ASCII
+  # ranges after folding are safe on every platform (verified on macOS CI).
+  # shellcheck disable=SC2018,SC2019
   sed -f "$FOLD/$1.sed" | tr 'A-Z' 'a-z'
 }
 
