@@ -1,0 +1,5 @@
+.quipu/
+activity.log
+capture-*.jsonl
+.claude/faz0/
+.claude/
