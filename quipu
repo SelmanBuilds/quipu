@@ -727,6 +727,12 @@ _q_cmd_remember() {
   _q_first=$(printf '%s\n' "$_q_digest" | awk -F"$_q_tab" '$1=="RANGE"{print $2; exit}')
   _q_lastts=$(printf '%s\n' "$_q_digest" | awk -F"$_q_tab" '$1=="RANGE"{print $3; exit}')
   _q_count=$(printf '%s\n' "$_q_digest" | awk -F"$_q_tab" '$1=="RANGE"{print $4; exit}')
+  # Defensive (spec C-1): when the slice holds no valid events, nothing is
+  # written and the watermark does not advance.
+  if [ -z "$_q_count" ] || [ "$_q_count" = 0 ]; then
+    _q_msg remember_empty
+    exit 0
+  fi
 
   _q_tools=$(printf '%s\n' "$_q_digest" | awk -F"$_q_tab" 'BEGIN{OFS=sprintf("%c",9)} $1=="TOOL"{print $2, $3}' | sort -t "$_q_tab" -k2,2nr | awk -F"$_q_tab" '{ if (first) printf ", "; printf "%s %s", $1, $2; first=1 }')
 
