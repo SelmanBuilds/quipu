@@ -287,6 +287,47 @@ _q_doctor() {
 
 # ---- capture ----------------------------------------------------------------
 
+# Normalize one path held in $_q_p (Windows drive-letter -> POSIX via cygpath
+# when the result lives inside the vault; vault-relative strip; TAB/CR/LF
+# removal). Caller sets $_q_p and $_q_v first.
+_q_norm_path() {
+  case "$_q_p" in
+    [A-Za-z]:*)
+      if command -v cygpath >/dev/null 2>&1; then
+        _q_orig=$_q_p
+        _q_p=$(cygpath -u "$_q_p" 2>/dev/null || printf '%s\n' "$_q_p")
+        case "$_q_p" in
+          "$_q_v"/*) : ;;
+          *) _q_p=$_q_orig ;;
+        esac
+      fi
+      ;;
+  esac
+  # Make it vault-relative when inside the vault, then strip TAB/CR/LF.
+  _q_p=${_q_p#"$_q_v"/}
+  _q_tab=$(printf '\t')
+  _q_p=$(printf '%s\n' "$_q_p" | tr -d "$_q_tab$(printf '\r\n')")
+}
+
+# Rotate activity.log once: mv to .1 and open a fresh file when over limit.
+# Caller sets $_q_v first; this sets $_q_log.
+_q_rotate_log() {
+  _q_log="$_q_v/.quipu/activity.log"
+  if [ -f "$_q_log" ]; then
+    _q_size=$(wc -c < "$_q_log")
+    if [ "$_q_size" -gt "${QUIPU_LOG_MAX:-262144}" ]; then
+      mv -f "$_q_log" "$_q_log.1"
+      : > "$_q_log"
+    fi
+  fi
+}
+
+# Append one row (already normalized) to activity.log. Caller sets $_q_ev,
+# $_q_tool, $_q_p and has run _q_rotate_log (which sets $_q_log).
+_q_append_line() {
+  printf '%s | %s | %s | %s\n' "$(date +%Y-%m-%dT%H:%M)" "$_q_ev" "$_q_tool" "$_q_p" >> "$_q_log"
+}
+
 _q_cmd_capture() {
   _q_v=$(_q_vault)
   if [ -z "$_q_v" ]; then
@@ -317,49 +358,30 @@ _q_cmd_capture() {
     if [ -z "$_q_out" ]; then
       exit 0
     fi
-    # Parameter expansion only: a heredoc would re-expand $ and backticks
-    # inside the path (data corruption).
-    _q_ev=${_q_out%%"$_q_tab"*}
-    _q_rest=${_q_out#*"$_q_tab"}
-    _q_tool=${_q_rest%%"$_q_tab"*}
-    _q_p=${_q_rest#*"$_q_tab"}
-    if [ -z "$_q_ev" ] || [ -z "$_q_tool" ] || [ -z "$_q_p" ]; then
-      exit 0
-    fi
   fi
 
-  # Path: Windows-form paths (drive letter, backslashes) arrive from
-  # Claude Code on Windows. Convert to POSIX; if the result lives inside
-  # the vault it is made vault-relative so digests stay portable. Paths
-  # outside the vault keep their exact original bytes (already absolute).
-  case "$_q_p" in
-    [A-Za-z]:*)
-      if command -v cygpath >/dev/null 2>&1; then
-        _q_orig=$_q_p
-        _q_p=$(cygpath -u "$_q_p" 2>/dev/null || printf '%s\n' "$_q_p")
-        case "$_q_p" in
-          "$_q_v"/*) : ;;
-          *) _q_p=$_q_orig ;;
-        esac
+  # Rotate once, before any append: a multi-row capture must never rotate
+  # mid-loop (earlier rows would be moved into activity.log.1 and lost).
+  _q_rotate_log
+
+  if [ "$_q_flag" -eq 1 ]; then
+    _q_norm_path
+    _q_append_line
+  else
+    # capture.awk may emit zero or many rows. Parameter expansion only: a
+    # heredoc would re-expand $ and backticks inside the path (corruption).
+    printf '%s\n' "$_q_out" | while IFS= read -r _q_ln; do
+      _q_ev=${_q_ln%%"$_q_tab"*}
+      _q_rest=${_q_ln#*"$_q_tab"}
+      _q_tool=${_q_rest%%"$_q_tab"*}
+      _q_p=${_q_rest#*"$_q_tab"}
+      if [ -z "$_q_ev" ] || [ -z "$_q_tool" ] || [ -z "$_q_p" ]; then
+        continue
       fi
-      ;;
-  esac
-  # Make it vault-relative when inside the vault, then strip TAB/CR/LF.
-  _q_p=${_q_p#"$_q_v"/}
-  _q_tab=$(printf '\t')
-  _q_p=$(printf '%s\n' "$_q_p" | tr -d "$_q_tab$(printf '\r\n')")
-
-  # Rotate before appending: mv to .1 and open a fresh file when over limit.
-  _q_log="$_q_v/.quipu/activity.log"
-  if [ -f "$_q_log" ]; then
-    _q_size=$(wc -c < "$_q_log")
-    if [ "$_q_size" -gt "${QUIPU_LOG_MAX:-262144}" ]; then
-      mv -f "$_q_log" "$_q_log.1"
-      : > "$_q_log"
-    fi
+      _q_norm_path
+      _q_append_line
+    done
   fi
-
-  printf '%s | %s | %s | %s\n' "$(date +%Y-%m-%dT%H:%M)" "$_q_ev" "$_q_tool" "$_q_p" >> "$_q_log"
 }
 
 # ---- init -------------------------------------------------------------------
