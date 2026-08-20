@@ -579,8 +579,9 @@ matrisi (`b63fb5f`; macOS runner = BSD `sed`/`awk`/`tr`/`stat` sınavı). FAZ 1 
 FAZ 2 ✅ (2026-08-20) — vault taksonomisi + kimlik: emoji varsayılan / `--plain` yerleşim,
 beş klasör + `.gitkeep`, `companion.md` ve `Threads.md` tohumları (yalnızca-yoksa, append-only),
 `AGENTS.md` köprü gövdesi + `CLAUDE.md` ince işaretçi, `_q_mdlist` tek-kaynak indeks dışlaması,
-doctor layout/companion/OneDrive kontrolleri; `docs/FAZ2-SPEC.md` sözleşmesi; yerelde 115 iddia
-yeşil (2 shellcheck skip — shellcheck CI'da kurulu).
+doctor layout/companion/OneDrive kontrolleri; `docs/FAZ2-SPEC.md` sözleşmesi; inceleme sonrası
+düzeltmeler D1-D4 (`faz2` dalı → PR #2, `9831a36`); üç OS CI'sı yeşil; yerelde 117/117, shellcheck
+0.10.0 sessiz.
 
 **Sıradaki:** FAZ 3: Claude Code adaptörü — `SessionStart` bağlam enjeksiyonu (JSON zarfı),
 `PostToolUse` capture, `SessionEnd` append-only özet + `git commit`.
