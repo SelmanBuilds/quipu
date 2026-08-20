@@ -52,6 +52,7 @@ fold_p() { # profile-name
 }
 
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+TAB=$(printf '\t')
 
 # ---- jsonfield: escapes, control bytes, UTF-8, missing field (PLAN 4.8) ----
 
@@ -257,6 +258,133 @@ assert_eq "context: empty vault exits 0" '0' "$RC"
 t; QUIPU_VAULT="$TMP/vagents" sh "$ROOT/quipu" init
 assert_eq "init: creates AGENTS.md when absent" 'yes' "$([ -f "$TMP/vagents/AGENTS.md" ] && printf yes || printf no)"
 t; assert_eq "init: AGENTS.md contains bridge heading" 'yes' "$(grep -q '^## quipu$' "$TMP/vagents/AGENTS.md" && printf yes || printf no)"
+# ---- FAZ 2: layout + identity ----
+
+t; BAD=$(awk 'index($0, sprintf("%c", 92)) != 0 { print FILENAME ":" NR }' "$ROOT/layout"/*.txt "$ROOT/persona"/*.md)
+assert_eq "no literal backslash in layout and persona data" '' "$BAD"
+
+SL1=$(awk -F"$TAB" '$0 !~ /^#/ && NF >= 2 {print $1}' "$ROOT/layout/emoji.txt")
+SL2=$(awk -F"$TAB" '$0 !~ /^#/ && NF >= 2 {print $1}' "$ROOT/layout/plain.txt")
+t; assert_eq "layout files share identical slug columns" "$SL1" "$SL2"
+
+KTR=$(awk -F= 'NF >= 1 && $1 !~ /^#/ {print $1}' "$ROOT/i18n/tr.txt" | sort)
+KEN=$(awk -F= 'NF >= 1 && $1 !~ /^#/ {print $1}' "$ROOT/i18n/en.txt" | sort)
+t; assert_eq "i18n tr/en key sets identical" "$KEN" "$KTR"
+
+mkvault vexcl
+: > "$TMP/vexcl/CLAUDE.md"
+printf '# Not\n' > "$TMP/vexcl/not.md"
+t; (cd "$TMP/vexcl" && "$ROOT/quipu" index) >/dev/null 2>&1
+assert_eq "index: CLAUDE.md excluded, not.md indexed" '1' "$(awk 'END{print NR}' "$TMP/vexcl/.quipu/index.tsv")"
+t; assert_eq "index: CLAUDE.md has no row" '' "$(awk -F"$TAB" 'index($1, "CLAUDE.md") {print $1}' "$TMP/vexcl/.quipu/index.tsv")"
+layout_names() { # emoji|plain -> one folder name per line
+  awk -F"$TAB" '$0 !~ /^#/ && NF >= 2 {print $2}' "$ROOT/layout/$1.txt"
+}
+comp_name() { # emoji|plain -> companion folder name
+  awk -F"$TAB" '$1=="companion"{print $2;exit}' "$ROOT/layout/$1.txt"
+}
+
+mkvault vlay
+QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" init
+
+t; FAILED=$(layout_names emoji | while IFS= read -r _n; do
+  if [ -d "$TMP/vlay/$_n" ] && [ -f "$TMP/vlay/$_n/.gitkeep" ]; then :; else printf '%s\n' "$_n"; fi
+done)
+assert_eq "init: five emoji folders each with .gitkeep" '' "$FAILED"
+
+mkvault vplain
+QUIPU_VAULT="$TMP/vplain" sh "$ROOT/quipu" init --plain
+t; GOT=$(cd "$TMP/vplain" && find . -maxdepth 1 -mindepth 1 -type d ! -name .quipu ! -name .git | cut -c3- | sort)
+assert_eq "init --plain: folder names match layout/plain.txt" "$(layout_names plain | sort)" "$GOT"
+t; BAD=$( (cd "$TMP/vplain" && find . -maxdepth 1 -mindepth 1 -type d ! -name .quipu ! -name .git) | LC_ALL=C grep '[^ -~]' || true)
+assert_eq "init --plain: folder names contain no non-ASCII bytes" '' "$BAD"
+
+t; assert_eq "init: config records layout=emoji" 'yes' "$(grep -q '^layout=emoji$' "$TMP/vlay/.quipu/config" && printf yes || printf no)"
+t; assert_eq "init --plain: config records layout=plain" 'yes' "$(grep -q '^layout=plain$' "$TMP/vplain/.quipu/config" && printf yes || printf no)"
+
+D0=$(find "$TMP/vlay" -type d | wc -l | tr -d ' ')
+QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" init --plain >"$TMP/vlay-conflict.out" 2>&1; RC=$?
+t; assert_eq "init --plain on emoji vault exits 2" '2' "$RC"
+t; assert_eq "init --plain conflict changes no folders" "$D0" "$(find "$TMP/vlay" -type d | wc -l | tr -d ' ')"
+
+D0=$(find "$TMP/vlay" -type d | wc -l | tr -d ' ')
+K0=$(find "$TMP/vlay" -name .gitkeep | wc -l | tr -d ' ')
+QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" init >/dev/null 2>&1
+t; assert_eq "init: second run keeps folder count" "$D0" "$(find "$TMP/vlay" -type d | wc -l | tr -d ' ')"
+t; assert_eq "init: second run keeps .gitkeep count" "$K0" "$(find "$TMP/vlay" -name .gitkeep | wc -l | tr -d ' ')"
+
+t; assert_eq "init: companion.md created and non-empty" 'yes' "$([ -s "$TMP/vlay/$(comp_name emoji)/companion.md" ] && printf yes || printf no)"
+
+printf 'user marker 7\n' >> "$TMP/vlay/$(comp_name emoji)/companion.md"
+QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" init >/dev/null 2>&1
+t; assert_eq "init: user companion.md edits preserved" 'yes' "$(grep -q '^user marker 7$' "$TMP/vlay/$(comp_name emoji)/companion.md" && printf yes || printf no)"
+
+mkvault vlaytr
+QUIPU_VAULT="$TMP/vlaytr" sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1
+t; assert_eq "init --lang tr: companion.md from Turkish persona" 'yes' "$(grep -q 'Üslup' "$TMP/vlaytr/$(comp_name emoji)/companion.md" && printf yes || printf no)"
+
+t; assert_eq "init: CLAUDE.md created with block pointing at AGENTS.md" 'yes' "$([ -f "$TMP/vlay/CLAUDE.md" ] && grep -q 'quipu:start' "$TMP/vlay/CLAUDE.md" && grep -q 'AGENTS.md' "$TMP/vlay/CLAUDE.md" && printf yes || printf no)"
+
+mkvault vclau
+printf 'user claude text\nkeep this too\n' > "$TMP/vclau/CLAUDE.md"
+QUIPU_VAULT="$TMP/vclau" sh "$ROOT/quipu" init >/dev/null 2>&1
+QUIPU_VAULT="$TMP/vclau" sh "$ROOT/quipu" init >/dev/null 2>&1
+t; assert_eq "init: pre-existing CLAUDE.md text preserved" 'yes' "$(grep -q '^keep this too$' "$TMP/vclau/CLAUDE.md" && printf yes || printf no)"
+t; assert_eq "init: CLAUDE.md block not duplicated" '1' "$(grep -c 'quipu:start' "$TMP/vclau/CLAUDE.md")"
+
+t; MISS=$(layout_names emoji | while IFS= read -r _n; do
+  awk -v s="$_n" 'index($0, s) {found=1} END {exit !found}' "$TMP/vlay/AGENTS.md" || printf '%s\n' "$_n"
+done)
+assert_eq "init: AGENTS.md block lists all five folders" '' "$MISS"
+
+t; assert_eq "init: Threads.md seeded" 'yes' "$([ -f "$TMP/vlay/Threads.md" ] && printf yes || printf no)"
+TITLE=$(awk -F= -v k=threads_seed_title '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt")
+NOTE=$(awk -F= -v k=threads_seed_note '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt")
+CTX=$(QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" context)
+t; assert_eq "context: prints threads section and seed" 'yes' "$(printf '%s\n' "$CTX" | grep -q "$TITLE" && printf '%s\n' "$CTX" | grep -q "$NOTE" && printf yes || printf no)"
+
+printf 'user thread marker\n' >> "$TMP/vlay/Threads.md"
+QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" init >/dev/null 2>&1
+t; assert_eq "init: user Threads.md lines preserved" 'yes' "$(grep -q '^user thread marker$' "$TMP/vlay/Threads.md" && printf yes || printf no)"
+
+QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" index >/dev/null 2>&1
+t; assert_eq "index: companion.md has a row" 'yes' "$(awk -F"$TAB" 'index($1, "companion.md") {print "yes"; exit}' "$TMP/vlay/.quipu/index.tsv")"
+t; assert_eq "index: companion.md path uses emoji folder" 'yes' "$(awk -F"$TAB" -v n="$(comp_name emoji)" 'index($1, "companion.md") && index($1, n) {print "yes"; exit}' "$TMP/vlay/.quipu/index.tsv")"
+
+P=$(QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" search Boundaries --paths)
+t; assert_eq "search: finds companion.md content" 'yes' "$(printf '%s\n' "$P" | grep -q 'companion.md' && printf yes || printf no)"
+t; assert_eq "search --paths: prints emoji folder path" 'yes' "$(printf '%s\n' "$P" | awk -v s="$(comp_name emoji)" 'index($0, s) {found=1} END {exit !found}' && printf yes || printf no)"
+
+TARGET="$(comp_name emoji)/not.md"
+QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" capture --event PostToolUse --tool Edit --path "$TARGET"
+t; assert_eq "capture: emoji-folder path logged intact" 'yes' "$(awk -v s="$TARGET" 'index($0, s) {found=1} END {exit !found}' "$TMP/vlay/.quipu/activity.log" && printf yes || printf no)"
+CTX=$(QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" context)
+t; assert_eq "context: prints emoji-folder capture path" 'yes' "$(printf '%s\n' "$CTX" | awk -v s="$TARGET" 'index($0, s) {found=1} END {exit !found}' && printf yes || printf no)"
+
+mkvault vfresh
+QUIPU_VAULT="$TMP/vfresh" sh "$ROOT/quipu" init >/dev/null 2>&1
+t; (cd "$TMP/vfresh" && QUIPU_LANG=en "$ROOT/quipu" doctor) >"$TMP/vfresh.out" 2>&1; RC=$?
+assert_eq "doctor: fresh emoji vault exits 0" '0' "$RC"
+
+mkvault vfreshp
+QUIPU_VAULT="$TMP/vfreshp" sh "$ROOT/quipu" init --plain >/dev/null 2>&1
+t; (cd "$TMP/vfreshp" && QUIPU_LANG=en "$ROOT/quipu" doctor) >"$TMP/vfreshp.out" 2>&1; RC=$?
+assert_eq "doctor: fresh --plain vault exits 0" '0' "$RC"
+
+t; assert_eq "doctor: layout line shows emoji" 'yes' "$(awk -F"$TAB" '$2=="layout" && $3=="emoji" {print "yes"; exit}' "$TMP/vfresh.out")"
+t; assert_eq "doctor: layout line shows plain" 'yes' "$(awk -F"$TAB" '$2=="layout" && $3=="plain" {print "yes"; exit}' "$TMP/vfreshp.out")"
+# doctor: the OneDrive install-path warning must not depend on a vault existing.
+ODH="$TMP/OneDrive-home"
+mkdir -p "$ODH"
+cp "$ROOT/quipu" "$ODH/"
+cp -r "$ROOT/lib" "$ROOT/i18n" "$ROOT/fold" "$ROOT/layout" "$ROOT/persona" "$ODH/"
+mkdir -p "$TMP/odwork"
+t; OUT=$( (cd "$TMP/odwork" && sh "$ODH/quipu" doctor) 2>&1 )
+assert_eq "doctor: OneDrive install path warns with no vault" 'yes' \
+  "$(printf '%s\n' "$OUT" | grep -q OneDrive && printf yes || printf no)"
+t; OUT=$( (cd "$TMP/vfreshp" && sh "$ODH/quipu" doctor) 2>&1 )
+assert_eq "doctor: plain layout suppresses the OneDrive warning" 'no' \
+  "$(printf '%s\n' "$OUT" | grep -q OneDrive && printf yes || printf no)"
 
 # ---- index ----
 

@@ -25,7 +25,7 @@ POSIX sh plus `sed`, `awk`, `grep`, `tr`, and `git`.
 
 ```
 quipu doctor    # environment diagnostics: tools present, agents installed, what's broken
-quipu init      # create .quipu/ + AGENTS.md bridge block
+quipu init      # create .quipu/ + five layout folders + AGENTS.md/CLAUDE.md bridges (--plain: ASCII folder names)
 quipu capture   # append one line to activity.log (reads a bounded prefix)
 quipu index     # build/refresh .quipu/index.tsv (incremental)
 quipu search    # folded lexical search + BM25
@@ -38,10 +38,13 @@ quipu context   # recent-session context; --json EVENT emits the hook envelope
 $ quipu init --lang tr
 quipu vault kuruldu: <vault>
 dil ayarlandı: tr
+yerleşim: emoji
 AGENTS.md köprü bloğu hazır
+companion.md tohumlandı
+sıradaki: quipu index
 $ printf '# Çalışma notu\n\nİstanbul üzerine.\n' > not.md
 $ quipu index
-# indekslendi 1 (yeniden 0, bayat 1, düştü 0)
+# indekslendi 3 (yeniden 0, bayat 3, düştü 0)
 $ quipu capture < tests/fixtures/posttooluse.json
 $ tail -1 .quipu/activity.log
 2026-08-20T10:10 | PostToolUse | Read | C:\Users\alice\projects\demo\taskbar_overflow.png
@@ -50,7 +53,7 @@ not.md
 $ quipu context --json SessionStart
 {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"…"}}
 $ quipu doctor; echo $?
-özet: 20 ok, 0 uyarı, 0 hata
+özet: 26 ok, 0 uyarı, 0 hata
 0
 ```
 
@@ -58,8 +61,10 @@ Outputs are Turkish because the vault was initialized with `--lang tr`.
 
 ## Status
 
-FAZ 1 is complete: the six-command core CLI, primitives, and the three-OS CI matrix.
-FAZ 2 — vault taxonomy and identity — is next. See [docs/PLAN.md](docs/PLAN.md).
+FAZ 1 and FAZ 2 are complete: the six-command CLI, primitives, three-OS CI matrix, and
+five-folder vault taxonomy (emoji by default, `--plain` for ASCII) with seeded
+`companion.md` + `Threads.md` and the `AGENTS.md`/`CLAUDE.md` bridge blocks.
+FAZ 3 — the Claude Code adapter — is next. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Honest limits
 

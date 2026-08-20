@@ -1,5 +1,6 @@
 *.sh text eol=lf
 *.sed text eol=lf
 *.awk text eol=lf
+persona/*.md text eol=lf
 *.txt text eol=lf
 /quipu text eol=lf

@@ -1,0 +1,5 @@
+inbox	📥 100-Inbox
+projects	🚧 300-Projects
+knowledge	📚 500-Knowledge
+sessions	📆 700-Sessions
+companion	🔮 850-Companion

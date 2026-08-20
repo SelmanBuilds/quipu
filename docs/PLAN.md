@@ -5,7 +5,7 @@
 > Buradaki tüm teknik bulgular **ölçülmüş ve doğrulanmıştır** — tahmin değildir.
 > Kanıtlar "Doğrulanmış Bulgular" bölümünde, yeniden üretme komutlarıyla birlikte.
 >
-> **Tarih:** 2026-08-20 · **Durum:** FAZ 1 tamam — altı komutlu CLI, üç OS CI yeşil (PR #1). FAZ 2 sırada.
+> **Tarih:** 2026-08-20 · **Durum:** FAZ 2 tamam — altı komutlu CLI + vault taksonomisi, üç OS CI yeşil. FAZ 3 sırada.
 > **İsim notu:** `quipu` seçildi. Değiştirmek istersen tüm dosyada tek find/replace yeter.
 
 ---
@@ -109,6 +109,7 @@ KATMAN 3 — HİBRİT ARAMA (0 maliyet, %100 çevrimdışı)
 | Senkron | `git remote` (opsiyonel) | claude-mem'in ücretli Pro özelliği, bizde bedava. |
 | MCP sunucusu | **v1'e alınmayacak** | MCP bir çalışma zamanı ister (node/python) → gereksinim 1 ihlali. v2'de opsiyonel paket olarak değerlendirilir. |
 | Dil | Kod/README İngilizce, Türkçe birinci sınıf | Global erişim + kimlik. |
+| Taksonomi | Beş klasör: `100-Inbox`, `300-Projects`, `500-Knowledge`, `700-Sessions`, `850-Companion`; emoji varsayılan, `--plain` ASCII'ye düşürür | `docs/FAZ2-SPEC.md` §0 (K-1/K-2), §3; klasör adı değişikliği = kullanıcı vault'unda taşıma |
 
 ---
 
@@ -336,6 +337,24 @@ Kullanıcı verisi stdin ya da dosya üzerinden geçer — awk her ikisini bayt 
 kaçış çözmez. Düzeltme: `lib/emit_hookctx.awk` bağlamı stdin'den okur; test 52 gerçek
 Windows yoluyla güçlendirildi.
 
+### 4.17 grep çok baytlı kalıpları eşleştirmeyebilir
+
+Windows'ta GNU grep 3.0, `LANG=en_US.UTF-8` altında 4 baytlık emoji kalıplarını eşleştirmiyor:
+
+```sh
+printf '[🔮 850-Companion]\n' | grep -q '🔮' && echo hit || echo miss   # miss
+printf '[🔮 850-Companion]\n' | awk 'index($0, "🔮") {print "hit"}'      # hit
+```
+
+| Araç | Sonuç |
+|---|---|
+| `grep -q` | eşleşmiyor |
+| `grep -qF` | eşleşmiyor (`-F` de kurtarmıyor) |
+| `awk index()` | eşleşiyor |
+| `grep 'OneDrive'` (ASCII) | eşleşiyor |
+
+> **KURAL:** Çok baytlı bir dizgeyi metinde ararken `grep` kullanma; `awk index()` kullan.
+> ASCII dizgeler için `grep` güvenlidir.
 ---
 
 ## 5. Ajan entegrasyon yüzeyleri
@@ -471,7 +490,7 @@ quipu/
 
 Lisans ilk commit'ten önce seçilmeli (avenoxbeyin MIT, claude-mem Apache-2.0).
 
-### FAZ 2 — Vault iskeleti + kimlik
+### FAZ 2 — Vault iskeleti + kimlik ✅
 - Klasör yapısı (avenoxbeyin'den ilham, emoji opsiyonel — `--plain` bayrağı olsun)
 - `AGENTS.md` (evrensel) + `CLAUDE.md` (ona işaret eden ince dosya)
 - Companion persona **veri olarak** (`companion.md`), kod değil → dil paketi gibi değiştirilebilir
@@ -520,6 +539,7 @@ POSIX uyumu) tekrarlanmaz.
 | Katlama kayıplı | `açık` ve `acık` çakışır. Bilinçli tercih, belgelenmeli. |
 | `activity.log` şişmesi | `PostToolUse` çok sık tetiklenir; rotasyon şart. → ✅ **KAPANDI** (Adım 3: 256 KB eşik, tek nesil `.1` rotasyonu — `QUIPU_LOG_MAX` ile ayarlanır) |
 | macOS/BSD test edilmedi | Bölüm 4 bulguları Windows+Git Bash'te ölçüldü. BSD `sed`/`awk`/`tr` farklılıkları CI'da doğrulanmalı. |
+| grep çok baytlı kalıp | Windows'ta GNU grep 3.0 4 baytlık emoji kalıplarını eşleştirmiyor. → ✅ **KAPANDI** (FAZ 2: testlerde `awk index()`'e geçildi, §4.17) |
 | Emoji klasörler + OneDrive | Kurulumda kontrol et. `--plain` alternatifi sun. |
 
 ---
@@ -556,8 +576,14 @@ matrisi (`b63fb5f`; macOS runner = BSD `sed`/`awk`/`tr`/`stat` sınavı). FAZ 1 
 (2026-08-20) — altı komutlu CLI yüzeyi: `doctor`, `capture`, `index`, `search`, `init`,
 `context`; `faz1-adim3` dalı → PR #1 (`f7c55aa`→`c2a8e92`), üç OS CI'sı yeşil; yerelde
 83/83, shellcheck 0.10.0 sessiz.
+FAZ 2 ✅ (2026-08-20) — vault taksonomisi + kimlik: emoji varsayılan / `--plain` yerleşim,
+beş klasör + `.gitkeep`, `companion.md` ve `Threads.md` tohumları (yalnızca-yoksa, append-only),
+`AGENTS.md` köprü gövdesi + `CLAUDE.md` ince işaretçi, `_q_mdlist` tek-kaynak indeks dışlaması,
+doctor layout/companion/OneDrive kontrolleri; `docs/FAZ2-SPEC.md` sözleşmesi; yerelde 115 iddia
+yeşil (2 shellcheck skip — shellcheck CI'da kurulu).
 
-**Sıradaki:** FAZ 2: vault taksonomisi + kimlik (`companion.md`, `Threads.md`).
+**Sıradaki:** FAZ 3: Claude Code adaptörü — `SessionStart` bağlam enjeksiyonu (JSON zarfı),
+`PostToolUse` capture, `SessionEnd` append-only özet + `git commit`.
 
 ### Çalışmaya başlarken
 1. Bu dosyayı ve `FAZ0-BULGULAR.md`'yi oku (ölçüm ayrıntıları orada).
