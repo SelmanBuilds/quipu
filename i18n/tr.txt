@@ -76,6 +76,8 @@ bridge_layout=Yerleşim:
 bridge_companion=Companion personası: %s/companion.md
 bridge_append=Yalnızca ekleme: quipu bu dosyaları asla yeniden yazmaz.
 bridge_claude=Vault yerleşimi ve kurallar için AGENTS.md'ye bak.
+bridge_updated=AGENTS.md bağlam bloğu güncellendi
+err_conflict=seçenekler birbirini dışlıyor
 # layout
 layout_inbox=hızlı, işlenmemiş notların iniş noktası
 layout_projects=aktif iş, proje başına bir alt klasör

@@ -117,6 +117,22 @@ usage() {
 
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 
+_q_md_filter() {
+  # stdin -> stdout: keep only .md vault-relative paths, dropping the agent
+  # bridge files and the pruned prefixes. Single source for _q_mdlist and
+  # `capture --git` (DZ-3): substr/index only, no regex (PLAN 4.8/4.17).
+  awk '
+    length($0) < 3 { next }
+    substr($0, length($0) - 2) != ".md" { next }
+    $0 == "AGENTS.md" { next }
+    $0 == "CLAUDE.md" { next }
+    index($0, ".quipu/") == 1 { next }
+    index($0, ".git/") == 1 { next }
+    index($0, "node_modules/") == 1 { next }
+    { print }
+  '
+}
+
 _q_mdlist() {
   # Vault-relative .md paths, excluding agent-bridge files. Caller must cd to
   # the vault first. $1 (optional): only files newer than this path.
@@ -126,7 +142,7 @@ _q_mdlist() {
   else
     find . \( -name .git -o -name .quipu -o -name node_modules \) -prune -o \
       -type f -name '*.md' -print
-  fi | sed 's|^\./||' | awk '$0 != "AGENTS.md" && $0 != "CLAUDE.md"'
+  fi | sed 's|^\./||' | _q_md_filter
 }
 
 # ---- init -------------------------------------------------------------------
@@ -338,9 +354,11 @@ _q_cmd_capture() {
   _q_tool=
   _q_p=
   _q_flag=0
+  _q_git=0
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --git) _q_git=1; shift ;;
       --event) _q_flag=1; [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_ev=$2; shift 2 ;;
       --tool)  _q_flag=1; [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_tool=$2; shift 2 ;;
       --path)  _q_flag=1; [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_p=$2; shift 2 ;;
@@ -348,11 +366,48 @@ _q_cmd_capture() {
     esac
   done
 
+  if [ "$_q_git" -eq 1 ] && [ "$_q_flag" -eq 1 ]; then
+    _q_die err_conflict 2
+  fi
+
+  # Flag-mode mandatory args: checked before any subshell that reuses _q_p.
   if [ "$_q_flag" -eq 1 ]; then
     if [ -z "$_q_ev" ] || [ -z "$_q_tool" ] || [ -z "$_q_p" ]; then
       _q_die err_missing_arg 2
     fi
-  else
+  fi
+
+  if [ "$_q_git" -eq 1 ]; then
+    # H-2: silent no-op when git is missing or the vault is not a repo.
+    if ! command -v git >/dev/null 2>&1 || ! (cd "$_q_v" && git rev-parse --git-dir >/dev/null 2>&1); then
+      exit 0
+    fi
+    # H-3 + DZ-2: changed tracked files only when HEAD exists; an unborn HEAD
+    # would make `git diff --name-only HEAD` exit 128 and trip `set -eu`.
+    if (cd "$_q_v" && git rev-parse --verify --quiet HEAD >/dev/null 2>&1); then
+      _q_ch=$( (cd "$_q_v" && git diff --name-only HEAD 2>/dev/null) )
+    else
+      _q_ch=""
+    fi
+    _q_un=$( (cd "$_q_v" && git ls-files --others --exclude-standard 2>/dev/null) )
+    # H-4 + DZ-3: single .md filter (stdin -> stdout).
+    _q_md=$( { printf '%s\n' "$_q_ch"; printf '%s\n' "$_q_un"; } | _q_md_filter )
+    # H-8: nothing changed -> silent success (H-7: stdout stays empty).
+    [ -n "$_q_md" ] || exit 0
+    # H-6: rotate once before the loop; H-5: shared per-line functions.
+    _q_ev=gitdiff
+    _q_tool=git
+    _q_rotate_log
+    printf '%s\n' "$_q_md" | while IFS= read -r _q_ln; do
+      [ -n "$_q_ln" ] || continue
+      _q_p=$_q_ln
+      _q_norm_path
+      _q_append_line
+    done
+    exit 0
+  fi
+
+  if [ "$_q_flag" -eq 0 ]; then
     _q_tab=$(printf '\t')
     _q_out=$(head -c "${QUIPU_MAX_STDIN:-65536}" | awk -f "$_q_HOME/lib/jsonfield.awk" -f "$_q_HOME/lib/capture.awk")
     if [ -z "$_q_out" ]; then
@@ -559,23 +614,11 @@ _q_cmd_init() {
 
 # ---- context ----------------------------------------------------------------
 
-_q_cmd_context() {
-  _q_ev=
-  _q_limit=10
-
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --json) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_ev=$2; shift 2 ;;
-      --limit) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_limit=$2; shift 2 ;;
-      *) _q_die err_missing_arg 2 ;;
-    esac
-  done
-
-  _q_v=$(_q_vault)
-  if [ -z "$_q_v" ]; then
-    _q_die err_no_vault
-  fi
-
+_q_ctx_text() {
+  # Global setter (DZ-7): builds $_q_text (and $_q_log) for the session
+  # context — activity + index + Threads.md (QUIPU_CTX_MAX bounded), no
+  # stdout. The nudge block stays OUTSIDE (--json UserPromptSubmit only).
+  # Caller sets $_q_v and $_q_limit first.
   _q_log="$_q_v/.quipu/activity.log"
 
   # Fixed part A: activity section (tail lines + per-path digest table).
@@ -638,6 +681,32 @@ $_q_idx"
   else
     _q_text="$_q_act$_q_idx"
   fi
+}
+
+_q_cmd_context() {
+  _q_ev=
+  _q_limit=10
+  _q_bridge=0
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --json) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_ev=$2; shift 2 ;;
+      --limit) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_limit=$2; shift 2 ;;
+      --bridge) _q_bridge=1; shift ;;
+      *) _q_die err_missing_arg 2 ;;
+    esac
+  done
+
+  if [ "$_q_bridge" -eq 1 ] && [ -n "$_q_ev" ]; then
+    _q_die err_conflict 2
+  fi
+
+  _q_v=$(_q_vault)
+  if [ -z "$_q_v" ]; then
+    _q_die err_no_vault
+  fi
+
+  _q_ctx_text
 
   # Nudge (C-19/C-20): only --json UserPromptSubmit, once more than
   # QUIPU_NUDGE_AFTER lines accumulate past the watermarks.
@@ -671,6 +740,16 @@ $_q_idx"
       _q_lastline=$(awk 'END { print $0 }' "$_q_log")
       printf '%s\n' "$_q_lastline" > "$_q_v/.quipu/nudged"
     fi
+  fi
+
+  if [ "$_q_bridge" -eq 1 ]; then
+    # H-11/H-13: write the context into a dedicated AGENTS.md block, never the
+    # static quipu:start block (init's property). printf (not echo) preserves
+    # the exact text; block.awk guarantees idempotence + user-content safety.
+    : >> "$_q_v/AGENTS.md"
+    printf '%s' "$_q_text" | awk -v start='<!-- quipu:context:start -->' -v end='<!-- quipu:context:end -->' -f "$_q_HOME/lib/block.awk" "$_q_v/AGENTS.md" > "$_q_v/.quipu/agents.tmp" && mv "$_q_v/.quipu/agents.tmp" "$_q_v/AGENTS.md"
+    _q_msg bridge_updated
+    exit 0
   fi
 
   if [ -n "$_q_ev" ]; then

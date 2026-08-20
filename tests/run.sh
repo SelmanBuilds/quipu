@@ -804,6 +804,140 @@ else
   t; skip "capture: Windows path becomes vault-relative" "cygpath not installed"
 fi
 
+# ---- FAZ 5: capture --git (T-57..T-64, T-69, T-70) + context --bridge (T-65..T-68, T-71) ----
+
+git_commit() { # dir msg
+  git -C "$TMP/$1" add -A
+  GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+    git -C "$TMP/$1" commit -qm "$2"
+}
+mk_git_vault() { # dir -> mkvault + git init + initial commit
+  mkvault "$1"
+  git init -q "$TMP/$1"
+  git_commit "$1" init
+}
+
+# T-57: one changed tracked .md -> one gitdiff line.
+mk_git_vault vgit57
+printf 'v1\n' > "$TMP/vgit57/note.md"
+git_commit vgit57 add-note
+printf 'v2\n' >> "$TMP/vgit57/note.md"
+t; QUIPU_VAULT="$TMP/vgit57" sh "$ROOT/quipu" capture --git
+assert_eq "capture --git: one changed .md -> one line" 'gitdiff | git | note.md' "$(log_line "$TMP/vgit57")"
+
+# T-58: multi-file diff -> one line per file, exact count.
+mk_git_vault vgit58
+printf 'a\n' > "$TMP/vgit58/a.md"
+printf 'b\n' > "$TMP/vgit58/b.md"
+printf 'c\n' > "$TMP/vgit58/c.md"
+git_commit vgit58 add
+printf 'a2\n' >> "$TMP/vgit58/a.md"
+printf 'b2\n' >> "$TMP/vgit58/b.md"
+printf 'c2\n' >> "$TMP/vgit58/c.md"
+t; QUIPU_VAULT="$TMP/vgit58" sh "$ROOT/quipu" capture --git
+assert_eq "capture --git: multi-file diff -> 3 lines" '3' "$(awk 'END{print NR}' "$TMP/vgit58/.quipu/activity.log")"
+
+# T-59: untracked new .md -> captured via ls-files --others.
+mk_git_vault vgit59
+printf 'new\n' > "$TMP/vgit59/new.md"
+t; QUIPU_VAULT="$TMP/vgit59" sh "$ROOT/quipu" capture --git
+assert_eq "capture --git: untracked new .md captured" 'gitdiff | git | new.md' "$(log_line "$TMP/vgit59")"
+
+# T-60: non-.md change -> no line (H-4 filter).
+mk_git_vault vgit60
+printf 'd\n' > "$TMP/vgit60/data.txt"
+git_commit vgit60 add-txt
+printf 'd2\n' >> "$TMP/vgit60/data.txt"
+t; OUT=$(QUIPU_VAULT="$TMP/vgit60" sh "$ROOT/quipu" capture --git); RC=$?
+assert_eq "capture --git: non-md change -> no line" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ -z "$OUT" ] && [ ! -s "$TMP/vgit60/.quipu/activity.log" ] && printf yes || printf no)"
+
+# T-61: AGENTS.md / CLAUDE.md change -> no line (H-4).
+mk_git_vault vgit61
+printf '# a\n' > "$TMP/vgit61/AGENTS.md"
+printf '# c\n' > "$TMP/vgit61/CLAUDE.md"
+git_commit vgit61 add-bridge
+printf '# a2\n' >> "$TMP/vgit61/AGENTS.md"
+printf '# c2\n' >> "$TMP/vgit61/CLAUDE.md"
+t; OUT=$(QUIPU_VAULT="$TMP/vgit61" sh "$ROOT/quipu" capture --git); RC=$?
+assert_eq "capture --git: AGENTS.md/CLAUDE.md change -> no line" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ -z "$OUT" ] && [ ! -s "$TMP/vgit61/.quipu/activity.log" ] && printf yes || printf no)"
+
+# T-62 (DZ-8b): vault that is not a repo -> silent exit 0; "git yok" left [doğrulanmadı].
+mkvault vgit62
+printf 'x\n' > "$TMP/vgit62/note.md"
+t; OUT=$(QUIPU_VAULT="$TMP/vgit62" sh "$ROOT/quipu" capture --git); RC=$?
+assert_eq "capture --git: not a repo -> silent exit 0" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ -z "$OUT" ] && [ ! -s "$TMP/vgit62/.quipu/activity.log" ] && printf yes || printf no)"
+
+# T-63: clean tree -> exit 0, no line.
+mk_git_vault vgit63
+printf 'x\n' > "$TMP/vgit63/note.md"
+git_commit vgit63 add
+t; OUT=$(QUIPU_VAULT="$TMP/vgit63" sh "$ROOT/quipu" capture --git); RC=$?
+assert_eq "capture --git: clean tree -> silent exit 0" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ -z "$OUT" ] && [ ! -s "$TMP/vgit63/.quipu/activity.log" ] && printf yes || printf no)"
+
+# T-64: deleted .md -> recorded (H-9; index `drop` handles it later).
+mk_git_vault vgit64
+printf 'x\n' > "$TMP/vgit64/gone.md"
+git_commit vgit64 add
+rm "$TMP/vgit64/gone.md"
+t; QUIPU_VAULT="$TMP/vgit64" sh "$ROOT/quipu" capture --git
+assert_eq "capture --git: deleted .md recorded" 'gitdiff | git | gone.md' "$(log_line "$TMP/vgit64")"
+
+# T-69 (DZ-2): unborn HEAD + untracked .md -> no abort, line present (ls-files path).
+mkvault vgit69
+git init -q "$TMP/vgit69"
+printf 'x\n' > "$TMP/vgit69/note.md"
+t; OUT=$(QUIPU_VAULT="$TMP/vgit69" sh "$ROOT/quipu" capture --git); RC=$?
+assert_eq "capture --git: unborn HEAD + untracked .md -> line present" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ -z "$OUT" ] && [ "$(log_line "$TMP/vgit69")" = 'gitdiff | git | note.md' ] && printf yes || printf no)"
+
+# T-70 (DZ-3): .md under .quipu/ -> filtered out (prefix test, not the old filter).
+mk_git_vault vgit70
+printf 'x\n' > "$TMP/vgit70/.quipu/secret.md"
+t; OUT=$(QUIPU_VAULT="$TMP/vgit70" sh "$ROOT/quipu" capture --git); RC=$?
+assert_eq "capture --git: .quipu/ .md filtered out" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ -z "$OUT" ] && [ ! -s "$TMP/vgit70/.quipu/activity.log" ] && printf yes || printf no)"
+
+# ---- context --bridge (T-65..T-68, T-71) ----
+
+# T-65: context block + context text inside; static block and user content preserved.
+mkvault vbridge
+printf 'user line 1\nuser line 2\n' > "$TMP/vbridge/AGENTS.md"
+printf 'static body\n' | awk -f "$LIB/block.awk" "$TMP/vbridge/AGENTS.md" > "$TMP/vbridge/.quipu/t.tmp" && mv "$TMP/vbridge/.quipu/t.tmp" "$TMP/vbridge/AGENTS.md"
+printf '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md\n' >> "$TMP/vbridge/.quipu/activity.log"
+t; QUIPU_LANG=en QUIPU_VAULT="$TMP/vbridge" sh "$ROOT/quipu" context --bridge >/dev/null 2>&1
+assert_eq "context --bridge: context block + user content + static block preserved" 'yes' \
+  "$(grep -q '^<!-- quipu:context:start -->$' "$TMP/vbridge/AGENTS.md" \
+     && grep -q '^<!-- quipu:context:end -->$' "$TMP/vbridge/AGENTS.md" \
+     && grep -q '^<!-- quipu:start -->$' "$TMP/vbridge/AGENTS.md" \
+     && grep -q '^user line 1$' "$TMP/vbridge/AGENTS.md" \
+     && grep -q '^user line 2$' "$TMP/vbridge/AGENTS.md" \
+     && grep -q '500-Knowledge/not.md' "$TMP/vbridge/AGENTS.md" && printf yes || printf no)"
+
+# T-66: idempotent — second run does not duplicate the block.
+t; QUIPU_LANG=en QUIPU_VAULT="$TMP/vbridge" sh "$ROOT/quipu" context --bridge >/dev/null 2>&1
+assert_eq "context --bridge: idempotent (single context block)" '1' "$(grep -c 'quipu:context:start' "$TMP/vbridge/AGENTS.md")"
+
+# T-67: stdout carries only the confirmation, not the raw context (i18n, QUIPU_LANG=en).
+t; OUT=$(QUIPU_LANG=en QUIPU_VAULT="$TMP/vbridge" sh "$ROOT/quipu" context --bridge); RC=$?
+BRIDGE_OK=$(i18n bridge_updated)
+assert_eq "context --bridge: stdout only confirmation" "$BRIDGE_OK" "$OUT"
+
+# T-68 (DZ-5): -v override targets the context markers (conditional BEGIN).
+: > "$TMP/t68.md"
+printf 'ctx body\n' | awk -v start='<!-- quipu:context:start -->' -v end='<!-- quipu:context:end -->' -f "$LIB/block.awk" "$TMP/t68.md" > "$TMP/t68.out"
+t; assert_eq "block.awk: -v override replaces default markers" 'yes' \
+  "$(grep -q '^<!-- quipu:context:start -->$' "$TMP/t68.out" && grep -q '^ctx body$' "$TMP/t68.out" && ! grep -q '^<!-- quipu:start -->$' "$TMP/t68.out" && printf yes || printf no)"
+
+# T-71 (DZ-5): without -v the exact default markers are preserved (literal lock).
+: > "$TMP/t71.md"
+printf 'default body\n' | awk -f "$LIB/block.awk" "$TMP/t71.md" > "$TMP/t71.out"
+t; assert_eq "block.awk: default markers exact text" 'yes' \
+  "$(grep -q '^<!-- quipu:start -->$' "$TMP/t71.out" && grep -q '^<!-- quipu:end -->$' "$TMP/t71.out" && grep -q '^default body$' "$TMP/t71.out" && printf yes || printf no)"
+
 # ---- summary ----
 
 printf '# pass %d, fail %d, skip %d\n' "$PASS" "$FAIL" "$SKIP"
