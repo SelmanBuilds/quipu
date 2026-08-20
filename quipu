@@ -113,6 +113,18 @@ usage() {
 
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 
+_q_mdlist() {
+  # Vault-relative .md paths, excluding agent-bridge files. Caller must cd to
+  # the vault first. $1 (optional): only files newer than this path.
+  if [ -n "${1:-}" ]; then
+    find . \( -name .git -o -name .quipu -o -name node_modules \) -prune -o \
+      -type f -name '*.md' -newer "$1" -print
+  else
+    find . \( -name .git -o -name .quipu -o -name node_modules \) -prune -o \
+      -type f -name '*.md' -print
+  fi | sed 's|^\./||' | awk '$0 != "AGENTS.md" && $0 != "CLAUDE.md"'
+}
+
 # ---- init -------------------------------------------------------------------
 
 _q_HOME=$(_q_home)
@@ -154,13 +166,21 @@ _q_doctor() {
   fi
 
   _q_msg doc_sec_files
-  for _q_f in fold/tr.sed fold/latin.sed fold/default.sed i18n/en.txt i18n/tr.txt; do
+  for _q_f in fold/tr.sed fold/latin.sed fold/default.sed i18n/en.txt i18n/tr.txt layout/emoji.txt layout/plain.txt persona/en.md persona/tr.md; do
     if [ -f "$_q_HOME/$_q_f" ]; then
       _q_line ok "$_q_f" "-"
     else
       _q_line fail "$_q_f" "-"
     fi
   done
+  _q_tab=$(printf '\t')
+  _q_s1=$(awk -F"$_q_tab" 'NF >= 2 && $0 !~ /^#/ {print $1}' "$_q_HOME/layout/emoji.txt" 2>/dev/null || true)
+  _q_s2=$(awk -F"$_q_tab" 'NF >= 2 && $0 !~ /^#/ {print $1}' "$_q_HOME/layout/plain.txt" 2>/dev/null || true)
+  if [ -n "$_q_s1" ] && [ "$_q_s1" = "$_q_s2" ]; then
+    _q_line ok 'layout/*.txt' '-'
+  else
+    _q_line fail 'layout/*.txt' "$(_q_msg doc_layout_mismatch)"
+  fi
 
   _q_msg doc_sec_vault
   _q_v=$(_q_vault)
@@ -168,10 +188,27 @@ _q_doctor() {
     _q_line warn vault "$(_q_msg doc_vault_missing)"
   else
     _q_line ok vault "$(_q_msg doc_vault_ok)"
+    # FAZ 2 (spec 4.6 B-21): layout line from config.
+    _q_lay=
+    if [ -f "$_q_v/.quipu/config" ]; then
+      _q_lay=$(awk -F= -v k=layout '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+    fi
+    if [ -z "$_q_lay" ]; then
+      _q_line warn "$(_q_msg doc_layout)" "$(_q_msg doc_layout_missing)"
+    else
+      _q_line ok "$(_q_msg doc_layout)" "$_q_lay"
+    fi
+    # FAZ 2 (spec 4.6 B-22): companion check, only for a known layout.
+    if [ "$_q_lay" = emoji ] || [ "$_q_lay" = plain ]; then
+      _q_comp=$(awk -F"$_q_tab" '$1=="companion"{print $2;exit}' "$_q_HOME/layout/$_q_lay.txt" 2>/dev/null || true)
+      if [ -n "$_q_comp" ] && [ ! -f "$_q_v/$_q_comp/companion.md" ]; then
+        _q_line warn companion "$(_q_msg doc_companion_missing)"
+      fi
+    fi
     if [ ! -f "$_q_v/.quipu/index.tsv" ]; then
       _q_line warn index "$(_q_msg doc_index_stale)"
     else
-      _q_new=$( (cd "$_q_v" && find . \( -name .git -o -name .quipu -o -name node_modules \) -prune -o -type f -name '*.md' -newer .quipu/index.tsv -print) 2>/dev/null | sed 's|^\./||' | awk '$0 != "AGENTS.md"' || true)
+      _q_new=$( (cd "$_q_v" && _q_mdlist .quipu/index.tsv) 2>/dev/null || true)
       if [ -n "$_q_new" ]; then
         _q_line warn index "$(_q_msg doc_index_stale)"
       else
@@ -205,9 +242,20 @@ _q_doctor() {
   fi
 
   _q_msg doc_sec_warn
-  case "$_q_HOME" in
-    *OneDrive*) _q_line warn path "$(_q_msg doc_onedrive)" ;;
-  esac
+  _q_lay=${_q_lay:-}
+  _q_v=$(_q_vault)
+  # PLAN 4.9: the emoji-folder risk applies when the active layout is emoji, and
+  # also when no layout is resolved yet - the next `init` defaults to emoji.
+  if [ "$_q_lay" != plain ]; then
+    case "$_q_HOME" in
+      *OneDrive*) _q_line warn path "$(_q_msg doc_onedrive)" ;;
+    esac
+  fi
+  if [ "$_q_lay" = emoji ]; then
+    case "$_q_v" in
+      *OneDrive*) _q_line warn vault "$(_q_msg doc_onedrive_vault)" ;;
+    esac
+  fi
   if awk 'index($0, sprintf("%c",13)) != 0 {c=1} END{exit !c}' "$0" 2>/dev/null; then
     _q_line warn eol "$(_q_msg doc_crlf)"
   fi
@@ -298,10 +346,11 @@ _q_cmd_init() {
   _q_v=${QUIPU_VAULT:-$PWD}
   _q_lang=
   _q_git=0
+  _q_plain=0
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --plain) shift ;;   # accepted; no-op until FAZ 2
+      --plain) _q_plain=1; shift ;;
       --git) _q_git=1; shift ;;
       --lang) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_lang=$2; shift 2 ;;
       *) _q_die err_missing_arg 2 ;;
@@ -314,6 +363,31 @@ _q_cmd_init() {
 
   if [ ! -f "$_q_v/.quipu/config" ]; then
     : > "$_q_v/.quipu/config"
+    _q_changed=1
+  fi
+
+  # Layout resolution (FAZ 2 spec 4.1): an existing config value wins; a
+  # conflicting --plain flag is a hard error before anything is written.
+  _q_cfg=
+  if [ -f "$_q_v/.quipu/config" ]; then
+    _q_cfg=$(awk -F= -v k=layout '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+  fi
+  if [ -n "$_q_cfg" ]; then
+    case "$_q_cfg" in
+      emoji|plain) : ;;
+      *) _q_die err_layout_unknown 2 ;;
+    esac
+    if [ "$_q_plain" -eq 1 ] && [ "$_q_cfg" = emoji ]; then
+      _q_die err_layout_conflict 2
+    fi
+    _q_layout=$_q_cfg
+  else
+    if [ "$_q_plain" -eq 1 ]; then
+      _q_layout=plain
+    else
+      _q_layout=emoji
+    fi
+    printf 'layout=%s\n' "$_q_layout" >> "$_q_v/.quipu/config"
     _q_changed=1
   fi
 
@@ -341,13 +415,79 @@ _q_cmd_init() {
     _q_changed=1
   fi
 
-  # AGENTS.md bridge block: idempotent via lib/block.awk.
+  # Folder tree: names come from layout/<layout>.txt (spec 2.1, B-3/B-10).
+  _q_tab=$(printf '\t')
+  while IFS= read -r _q_ln; do
+    [ -n "$_q_ln" ] || continue
+    case "$_q_ln" in
+      '#'*) continue ;;
+    esac
+    _q_name=${_q_ln#*"$_q_tab"}
+    [ "$_q_name" = "$_q_ln" ] && continue
+    mkdir -p "$_q_v/$_q_name"
+    if [ ! -f "$_q_v/$_q_name/.gitkeep" ]; then
+      : > "$_q_v/$_q_name/.gitkeep"
+    fi
+  done < "$_q_HOME/layout/$_q_layout.txt"
+
+  # Companion folder name (needed for the seed and the bridge body).
+  _q_cname=
+  while IFS= read -r _q_ln; do
+    [ -n "$_q_ln" ] || continue
+    case "$_q_ln" in
+      '#'*) continue ;;
+    esac
+    _q_slug=${_q_ln%%"$_q_tab"*}
+    [ "$_q_slug" = companion ] && _q_cname=${_q_ln#*"$_q_tab"}
+  done < "$_q_HOME/layout/$_q_layout.txt"
+
+  # Seeds: only-if-missing, never touched again (spec 4.2, B-9).
+  _q_comp=0
+  if [ -n "$_q_cname" ]; then
+    _q_pers=$(_q_lang)
+    if [ ! -f "$_q_HOME/persona/$_q_pers.md" ]; then
+      _q_pers=en
+    fi
+    if [ ! -f "$_q_v/$_q_cname/companion.md" ]; then
+      cp "$_q_HOME/persona/$_q_pers.md" "$_q_v/$_q_cname/companion.md"
+      _q_changed=1
+      _q_comp=1
+    fi
+  fi
+
+  if [ ! -f "$_q_v/Threads.md" ]; then
+    printf '%s\n%s\n' "$(_q_msg threads_seed_title)" "$(_q_msg threads_seed_note)" > "$_q_v/Threads.md"
+    _q_changed=1
+  fi
+
+  # AGENTS.md bridge block: body from i18n + layout file, via stdin (B-13).
   : >> "$_q_v/AGENTS.md"
   _q_had_block=0
   if grep -q 'quipu:start' "$_q_v/AGENTS.md"; then
     _q_had_block=1
   fi
-  printf '%s\n' '## quipu' 'Run: quipu context' | awk -f "$_q_HOME/lib/block.awk" "$_q_v/AGENTS.md" > "$_q_v/.quipu/agents.tmp" && mv "$_q_v/.quipu/agents.tmp" "$_q_v/AGENTS.md"
+  {
+    printf '%s\n' '## quipu'
+    printf '%s\n' "$(_q_msg bridge_run)"
+    printf '%s\n' "$(_q_msg bridge_layout)"
+    while IFS= read -r _q_ln; do
+      [ -n "$_q_ln" ] || continue
+      case "$_q_ln" in
+        '#'*) continue ;;
+      esac
+      _q_slug=${_q_ln%%"$_q_tab"*}
+      _q_name=${_q_ln#*"$_q_tab"}
+      printf '  - %s — %s\n' "$_q_name" "$(_q_msg "layout_$_q_slug")"
+    done < "$_q_HOME/layout/$_q_layout.txt"
+    # bridge_companion carries %s; resolved by printf below (SC2059 pattern).
+    # shellcheck disable=SC2059
+    printf "$(_q_msg bridge_companion)\n" "$_q_cname"
+    printf '%s\n' "$(_q_msg bridge_append)"
+  } | awk -f "$_q_HOME/lib/block.awk" "$_q_v/AGENTS.md" > "$_q_v/.quipu/agents.tmp" && mv "$_q_v/.quipu/agents.tmp" "$_q_v/AGENTS.md"
+
+  # CLAUDE.md: thin pointer, single marker block (spec 4.4, B-14/B-15).
+  : >> "$_q_v/CLAUDE.md"
+  printf '%s\n' "$(_q_msg bridge_claude)" | awk -f "$_q_HOME/lib/block.awk" "$_q_v/CLAUDE.md" > "$_q_v/.quipu/claude.tmp" && mv "$_q_v/.quipu/claude.tmp" "$_q_v/CLAUDE.md"
 
   if [ "$_q_changed" -eq 0 ] && [ "$_q_had_block" -eq 1 ]; then
     _q_msg init_idem
@@ -361,9 +501,15 @@ _q_cmd_init() {
       # shellcheck disable=SC2059
       printf "$(_q_msg init_lang)\n" "$_q_lang"
     fi
+    # shellcheck disable=SC2059
+    printf "$(_q_msg init_layout)\n" "$_q_layout"
     if [ "$_q_had_block" -eq 0 ]; then
       _q_msg init_agents
     fi
+    if [ "$_q_comp" -eq 1 ]; then
+      _q_msg init_companion
+    fi
+    _q_msg init_next
   fi
 }
 
@@ -483,12 +629,12 @@ _q_cmd_index() {
     cp "$_q_v/.quipu/index.tsv" "$_q_old"
   fi
 
-  (cd "$_q_v" && find . \( -name .git -o -name .quipu -o -name node_modules \) -prune -o -type f -name '*.md' -print) | sed 's|^\./||' | awk '$0 != "AGENTS.md"' > "$_q_tmp/all.txt"
+  (cd "$_q_v" && _q_mdlist) > "$_q_tmp/all.txt"
 
   if [ "$_q_full" -eq 1 ] || [ ! -f "$_q_v/.quipu/index.tsv" ]; then
     cp "$_q_tmp/all.txt" "$_q_tmp/changed.txt"
   else
-    (cd "$_q_v" && find . \( -name .git -o -name .quipu -o -name node_modules \) -prune -o -type f -name '*.md' -newer .quipu/index.tsv -print) | sed 's|^\./||' | awk '$0 != "AGENTS.md"' > "$_q_tmp/changed.txt"
+    (cd "$_q_v" && _q_mdlist .quipu/index.tsv) > "$_q_tmp/changed.txt"
   fi
 
   (cd "$_q_v" && while IFS= read -r _q_p; do printf '%s\t%s\n' "$_q_p" "$(mtime "$_q_p")"; done < "$_q_tmp/changed.txt") > "$_q_tmp/cur.txt"

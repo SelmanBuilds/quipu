@@ -32,6 +32,11 @@ doc_crlf=own source contains CR bytes (set eol=lf)
 doc_onedrive=path contains OneDrive (emoji folder risk, PLAN 4.9)
 doc_locale=locale is not UTF-8 (folding risk, PLAN 4.3)
 doc_summary=summary: %d ok, %d warn, %d fail
+doc_layout_mismatch=layout/emoji.txt and layout/plain.txt slug sets differ
+doc_layout=layout
+doc_layout_missing=config has no layout= value (run: quipu init)
+doc_companion_missing=companion.md missing (run: quipu init)
+doc_onedrive_vault=vault path contains OneDrive (emoji folder risk, PLAN 4.9)
 # index
 idx_summary=# indexed %d (reused %d, stale %d, dropped %d)
 # search
@@ -43,8 +48,28 @@ init_idem=vault already initialized; nothing changed
 init_git=git repository initialized
 init_lang=language set: %s
 init_agents=AGENTS.md bridge block ensured
+init_next=next: quipu index
+init_layout=layout: %s
+init_companion=companion.md seeded
+err_layout_conflict=layout conflict: --plain was requested but config says emoji
+err_layout_unknown=unknown layout value in config
 # context
 ctx_activity=recent activity
 ctx_threads=threads
 ctx_index=index stats
 ctx_empty=no memory yet
+# bridge
+bridge_run=Run: quipu context
+bridge_layout=Layout:
+bridge_companion=Companion persona: %s/companion.md
+bridge_append=Append-only: quipu never rewrites these files.
+bridge_claude=See AGENTS.md for vault layout and rules.
+# layout
+layout_inbox=capture point for quick, unprocessed notes
+layout_projects=active work, one subfolder per project
+layout_knowledge=long-lived notes and references
+layout_sessions=per-session memory (FAZ 3 SessionEnd)
+layout_companion=companion persona and identity
+# threads
+threads_seed_title=# Threads
+threads_seed_note=Ongoing threads in this vault. Append new lines; quipu never rewrites this file.

@@ -32,6 +32,11 @@ doc_crlf=kendi kaynağında CR baytı var (eol=lf ayarla)
 doc_onedrive=yol OneDrive içeriyor (emoji klasör riski, plan 4.9)
 doc_locale=locale UTF-8 değil (katlama riski, plan 4.3)
 doc_summary=özet: %d ok, %d uyarı, %d hata
+doc_layout_mismatch=layout/emoji.txt ve layout/plain.txt slug kümeleri farklı
+doc_layout=yerleşim
+doc_layout_missing=config'te layout= değeri yok (çalıştır: quipu init)
+doc_companion_missing=companion.md yok (çalıştır: quipu init)
+doc_onedrive_vault=vault yolu OneDrive içeriyor (emoji klasör riski, plan 4.9)
 # index
 idx_summary=# indekslendi %d (yeniden %d, bayat %d, düştü %d)
 # search
@@ -43,8 +48,28 @@ init_idem=vault zaten kurulu; değişiklik yapılmadı
 init_git=git deposu kuruldu
 init_lang=dil ayarlandı: %s
 init_agents=AGENTS.md köprü bloğu hazır
+init_next=sıradaki: quipu index
+init_layout=yerleşim: %s
+init_companion=companion.md tohumlandı
+err_layout_conflict=yerleşim çakışması: --plain istendi ama config emoji diyor
+err_layout_unknown=config'te tanınmayan yerleşim değeri
 # context
 ctx_activity=son etkinlik
 ctx_threads=konular
 ctx_index=indeks istatistiği
 ctx_empty=henüz hafıza yok
+# bridge
+bridge_run=Çalıştır: quipu context
+bridge_layout=Yerleşim:
+bridge_companion=Companion personası: %s/companion.md
+bridge_append=Yalnızca ekleme: quipu bu dosyaları asla yeniden yazmaz.
+bridge_claude=Vault yerleşimi ve kurallar için AGENTS.md'ye bak.
+# layout
+layout_inbox=hızlı, işlenmemiş notların iniş noktası
+layout_projects=aktif iş, proje başına bir alt klasör
+layout_knowledge=kalıcı notlar ve referanslar
+layout_sessions=oturum başına hafıza (FAZ 3 SessionEnd)
+layout_companion=companion personası ve kimlik
+# threads
+threads_seed_title=# Konular
+threads_seed_note=Bu vault'ta süren iş başlıkları. Yeni satır ekle; quipu bu dosyayı asla yeniden yazmaz.
