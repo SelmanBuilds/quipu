@@ -1,0 +1,50 @@
+# core
+usage_head=Usage: quipu COMMAND [options]
+usage_doctor=  doctor    check environment: tools, dialects, vault, agents
+usage_capture=  capture   append a tool-use event to activity.log (reads stdin)
+usage_index=  index     build/update .quipu/index.tsv (incremental)
+usage_search=  search    folded lexical + BM25 search over the index
+usage_init=  init      create .quipu/ and the AGENTS.md bridge block
+usage_context=  context   print session memory context for the agent
+err_unknown=unknown command:
+err_no_vault=no vault found (.quipu/ missing); run: quipu init
+err_missing_arg=missing required argument
+# doctor
+doc_head=quipu doctor - environment check
+doc_ok=ok
+doc_warn=warn
+doc_fail=fail
+doc_sec_tools=tools
+doc_sec_dialects=dialects
+doc_sec_files=shipped files
+doc_sec_vault=vault
+doc_sec_agents=agent surfaces
+doc_sec_warn=warnings
+doc_stat_gnu=GNU stat (-c %Y)
+doc_stat_bsd=BSD stat (-f %m)
+doc_stat_none=stat not found - mtime() falls back to 0
+doc_awk_bs=awk code-point backslash (PLAN 4.11)
+doc_vault_ok=vault present
+doc_vault_missing=vault missing (quipu init)
+doc_index_stale=index.tsv missing or stale (quipu index)
+doc_log_size=activity.log size
+doc_crlf=own source contains CR bytes (set eol=lf)
+doc_onedrive=path contains OneDrive (emoji folder risk, PLAN 4.9)
+doc_locale=locale is not UTF-8 (folding risk, PLAN 4.3)
+doc_summary=summary: %d ok, %d warn, %d fail
+# index
+idx_summary=# indexed %d (reused %d, stale %d, dropped %d)
+# search
+err_empty_query=empty query
+err_no_index=index.tsv missing; run: quipu index
+# init
+init_ok=quipu vault initialized: %s
+init_idem=vault already initialized; nothing changed
+init_git=git repository initialized
+init_lang=language set: %s
+init_agents=AGENTS.md bridge block ensured
+# context
+ctx_activity=recent activity
+ctx_threads=threads
+ctx_index=index stats
+ctx_empty=no memory yet

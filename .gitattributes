@@ -2,3 +2,4 @@
 *.sed text eol=lf
 *.awk text eol=lf
 *.txt text eol=lf
+/quipu text eol=lf

@@ -1,0 +1,601 @@
+#!/bin/sh
+# quipu — vault CLI for tool-use memory: capture, index, search, doctor.
+# Single-file POSIX sh (PLAN FAZ 1). No bashisms: no [[ ]], no local,
+# no ${var,,}; helpers are _q_-prefixed globals.
+#
+# Backslash policy (PLAN 4.11): literal backslashes appear only as DATA in
+# single-quoted printf formats / expected values, never as logic escapes.
+# Control bytes are produced from code points (awk sprintf("%c",N)).
+
+set -eu
+
+# ---- helpers ----------------------------------------------------------------
+
+_q_home() {
+  # Install directory of the quipu script (or QUIPU_HOME override).
+  if [ -n "${QUIPU_HOME:-}" ]; then
+    printf '%s\n' "$QUIPU_HOME"
+    return 0
+  fi
+  CDPATH='' cd -- "$(dirname -- "$0")" && pwd
+}
+
+_q_vault() {
+  # Vault root: nearest ancestor of $PWD holding .quipu/config (git-style
+  # walk-up), or the QUIPU_VAULT override. Empty when none found.
+  if [ -n "${QUIPU_VAULT:-}" ]; then
+    printf '%s\n' "$QUIPU_VAULT"
+    return 0
+  fi
+  _q_dir=$PWD
+  while :; do
+    if [ -f "$_q_dir/.quipu/config" ]; then
+      printf '%s\n' "$_q_dir"
+      return 0
+    fi
+    _q_parent=$(dirname "$_q_dir")
+    if [ "$_q_parent" = "$_q_dir" ]; then
+      break
+    fi
+    _q_dir=$_q_parent
+  done
+  return 0
+}
+
+_q_lang() {
+  # Language chain: QUIPU_LANG -> vault .quipu/config lang= ->
+  # LC_ALL/LANG prefix (before first dot/underscore) -> en.
+  _q_l=${QUIPU_LANG:-}
+  if [ -z "$_q_l" ]; then
+    _q_v=$(_q_vault)
+    if [ -n "$_q_v" ] && [ -f "$_q_v/.quipu/config" ]; then
+      _q_l=$(awk -F= -v k=lang '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+    fi
+  fi
+  if [ -z "$_q_l" ]; then
+    _q_l=${LC_ALL:-${LANG:-}}
+    _q_l=${_q_l%%.*}
+    _q_l=${_q_l%%_*}
+  fi
+  if [ -z "$_q_l" ]; then
+    _q_l=en
+  fi
+  printf '%s\n' "$_q_l"
+}
+
+_q_msg() {
+  # Look up a key in the active language file; fall back to en, then the key.
+  _q_l=$(_q_lang)
+  _q_f="$_q_HOME/i18n/$_q_l.txt"
+  if [ ! -f "$_q_f" ]; then
+    _q_f="$_q_HOME/i18n/en.txt"
+  fi
+  _q_v=
+  if [ -f "$_q_f" ]; then
+    _q_v=$(awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_f" 2>/dev/null || true)
+  fi
+  if [ -n "$_q_v" ]; then
+    printf '%s\n' "$_q_v"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+_q_die() {
+  _q_msg "$1" >&2
+  exit "${2:-1}"
+}
+
+_q_warn() {
+  _q_msg "$1" >&2
+}
+
+_q_line() {
+  # Print one doctor row: status<TAB>name<TAB>detail; bump the counter.
+  case "$1" in
+    ok) OK=$((OK + 1)); _q_st=$(_q_msg doc_ok) ;;
+    warn) WARN=$((WARN + 1)); _q_st=$(_q_msg doc_warn) ;;
+    fail) FAIL=$((FAIL + 1)); _q_st=$(_q_msg doc_fail) ;;
+    *) _q_st=$1 ;;
+  esac
+  printf '%s\t%s\t%s\n' "$_q_st" "$2" "$3"
+}
+
+usage() {
+  _q_msg usage_head
+  _q_msg usage_doctor
+  _q_msg usage_capture
+  _q_msg usage_index
+  _q_msg usage_search
+  _q_msg usage_init
+  _q_msg usage_context
+}
+
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+
+# ---- init -------------------------------------------------------------------
+
+_q_HOME=$(_q_home)
+
+# ---- doctor -----------------------------------------------------------------
+
+_q_doctor() {
+  OK=0
+  WARN=0
+  FAIL=0
+
+  _q_msg doc_head
+
+  _q_msg doc_sec_tools
+  for _q_t in sh sed awk grep tr git find date head; do
+    if _q_p=$(command -v "$_q_t" 2>/dev/null); then
+      _q_line ok "$_q_t" "$_q_p"
+    else
+      _q_line fail "$_q_t" "-"
+    fi
+  done
+
+  _q_msg doc_sec_dialects
+  if stat -c %Y "$0" >/dev/null 2>&1; then
+    _q_line ok stat "$(_q_msg doc_stat_gnu)"
+  elif stat -f %m "$0" >/dev/null 2>&1; then
+    _q_line ok stat "$(_q_msg doc_stat_bsd)"
+  else
+    _q_line fail stat "$(_q_msg doc_stat_none)"
+  fi
+  _q_awk=$(awk 'BEGIN{printf "%c",92}')
+  # The shell must itself produce one backslash byte to test awk against.
+  # shellcheck disable=SC1003
+  _q_bs=$(printf '\\')
+  if [ "$_q_awk" = "$_q_bs" ]; then
+    _q_line ok awk "$(_q_msg doc_awk_bs)"
+  else
+    _q_line fail awk "$(_q_msg doc_awk_bs)"
+  fi
+
+  _q_msg doc_sec_files
+  for _q_f in fold/tr.sed fold/latin.sed fold/default.sed i18n/en.txt i18n/tr.txt; do
+    if [ -f "$_q_HOME/$_q_f" ]; then
+      _q_line ok "$_q_f" "-"
+    else
+      _q_line fail "$_q_f" "-"
+    fi
+  done
+
+  _q_msg doc_sec_vault
+  _q_v=$(_q_vault)
+  if [ -z "$_q_v" ]; then
+    _q_line warn vault "$(_q_msg doc_vault_missing)"
+  else
+    _q_line ok vault "$(_q_msg doc_vault_ok)"
+    if [ ! -f "$_q_v/.quipu/index.tsv" ]; then
+      _q_line warn index "$(_q_msg doc_index_stale)"
+    else
+      _q_new=$( (cd "$_q_v" && find . \( -name .git -o -name .quipu -o -name node_modules \) -prune -o -type f -name '*.md' -newer .quipu/index.tsv -print) 2>/dev/null | sed 's|^\./||' | awk '$0 != "AGENTS.md"' || true)
+      if [ -n "$_q_new" ]; then
+        _q_line warn index "$(_q_msg doc_index_stale)"
+      else
+        _q_line ok index "-"
+      fi
+    fi
+    _q_log="$_q_v/.quipu/activity.log"
+    if [ -f "$_q_log" ]; then
+      _q_size=$(wc -c < "$_q_log")
+    else
+      _q_size=0
+    fi
+    _q_line ok "$(_q_msg doc_log_size)" "$_q_size"
+  fi
+
+  _q_msg doc_sec_agents
+  if [ -e "$HOME/.claude/settings.json" ]; then
+    _q_line ok claude "$HOME/.claude/settings.json"
+  fi
+  if [ -e "$HOME/.codex/config.toml" ]; then
+    _q_line ok codex "$HOME/.codex/config.toml"
+  fi
+  if [ -e "./opencode.json" ]; then
+    _q_line ok opencode "./opencode.json"
+  fi
+  if [ -e "./cursor-hooks/hooks.json" ]; then
+    _q_line ok cursor "./cursor-hooks/hooks.json"
+  fi
+  if [ -e "./.windsurf" ]; then
+    _q_line ok windsurf "./.windsurf"
+  fi
+
+  _q_msg doc_sec_warn
+  case "$_q_HOME" in
+    *OneDrive*) _q_line warn path "$(_q_msg doc_onedrive)" ;;
+  esac
+  if awk 'index($0, sprintf("%c",13)) != 0 {c=1} END{exit !c}' "$0" 2>/dev/null; then
+    _q_line warn eol "$(_q_msg doc_crlf)"
+  fi
+  _q_lc=${LC_ALL:-${LANG:-}}
+  if [ -n "$_q_lc" ]; then
+    case "$_q_lc" in
+      *UTF-8*|*utf-8*|C|POSIX) : ;;
+      *) _q_line warn locale "$(_q_msg doc_locale)" ;;
+    esac
+  fi
+
+  _q_fmt=$(_q_msg doc_summary)
+  # doc_summary carries %d placeholders resolved by printf below; the format
+  # string comes from i18n, so it must be used as the printf format directly.
+  # shellcheck disable=SC2059
+  printf "$_q_fmt" "$OK" "$WARN" "$FAIL"
+  printf '\n'
+  if [ "$FAIL" -gt 0 ]; then
+    exit 1
+  fi
+  exit 0
+}
+
+# ---- capture ----------------------------------------------------------------
+
+_q_cmd_capture() {
+  _q_v=$(_q_vault)
+  if [ -z "$_q_v" ]; then
+    _q_die err_no_vault
+  fi
+
+  _q_ev=
+  _q_tool=
+  _q_p=
+  _q_flag=0
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --event) _q_flag=1; [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_ev=$2; shift 2 ;;
+      --tool)  _q_flag=1; [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_tool=$2; shift 2 ;;
+      --path)  _q_flag=1; [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_p=$2; shift 2 ;;
+      *) _q_die err_missing_arg 2 ;;
+    esac
+  done
+
+  if [ "$_q_flag" -eq 1 ]; then
+    if [ -z "$_q_ev" ] || [ -z "$_q_tool" ] || [ -z "$_q_p" ]; then
+      _q_die err_missing_arg 2
+    fi
+  else
+    _q_tab=$(printf '\t')
+    _q_out=$(head -c "${QUIPU_MAX_STDIN:-65536}" | awk -f "$_q_HOME/lib/jsonfield.awk" -f "$_q_HOME/lib/capture.awk")
+    if [ -z "$_q_out" ]; then
+      exit 0
+    fi
+    # Parameter expansion only: a heredoc would re-expand $ and backticks
+    # inside the path (data corruption).
+    _q_ev=${_q_out%%"$_q_tab"*}
+    _q_rest=${_q_out#*"$_q_tab"}
+    _q_tool=${_q_rest%%"$_q_tab"*}
+    _q_p=${_q_rest#*"$_q_tab"}
+    if [ -z "$_q_ev" ] || [ -z "$_q_tool" ] || [ -z "$_q_p" ]; then
+      exit 0
+    fi
+  fi
+
+  # Path: make it vault-relative when inside the vault, then strip TAB/CR/LF.
+  _q_p=${_q_p#"$_q_v"/}
+  _q_tab=$(printf '\t')
+  _q_p=$(printf '%s\n' "$_q_p" | tr -d "$_q_tab$(printf '\r\n')")
+
+  # Rotate before appending: mv to .1 and open a fresh file when over limit.
+  _q_log="$_q_v/.quipu/activity.log"
+  if [ -f "$_q_log" ]; then
+    _q_size=$(wc -c < "$_q_log")
+    if [ "$_q_size" -gt "${QUIPU_LOG_MAX:-262144}" ]; then
+      mv -f "$_q_log" "$_q_log.1"
+      : > "$_q_log"
+    fi
+  fi
+
+  printf '%s | %s | %s | %s\n' "$(date +%Y-%m-%dT%H:%M)" "$_q_ev" "$_q_tool" "$_q_p" >> "$_q_log"
+}
+
+# ---- init -------------------------------------------------------------------
+
+_q_cmd_init() {
+  _q_v=${QUIPU_VAULT:-$PWD}
+  _q_lang=
+  _q_git=0
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --plain) shift ;;   # accepted; no-op until FAZ 2
+      --git) _q_git=1; shift ;;
+      --lang) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_lang=$2; shift 2 ;;
+      *) _q_die err_missing_arg 2 ;;
+    esac
+  done
+
+  _q_changed=0
+
+  mkdir -p "$_q_v/.quipu"
+
+  if [ ! -f "$_q_v/.quipu/config" ]; then
+    : > "$_q_v/.quipu/config"
+    _q_changed=1
+  fi
+
+  if [ -n "$_q_lang" ]; then
+    if grep -q '^lang=' "$_q_v/.quipu/config"; then
+      sed "s/^lang=.*/lang=$_q_lang/" "$_q_v/.quipu/config" > "$_q_v/.quipu/config.tmp" && mv "$_q_v/.quipu/config.tmp" "$_q_v/.quipu/config"
+    else
+      printf 'lang=%s\n' "$_q_lang" >> "$_q_v/.quipu/config"
+    fi
+    _q_changed=1
+  fi
+
+  if [ ! -f "$_q_v/.quipu/index.tsv" ]; then
+    : > "$_q_v/.quipu/index.tsv"
+    _q_changed=1
+  fi
+
+  if [ ! -f "$_q_v/.quipu/activity.log" ]; then
+    : > "$_q_v/.quipu/activity.log"
+    _q_changed=1
+  fi
+
+  if [ "$_q_git" -eq 1 ]; then
+    git init -q "$_q_v"
+    _q_changed=1
+  fi
+
+  # AGENTS.md bridge block: idempotent via lib/block.awk.
+  : >> "$_q_v/AGENTS.md"
+  _q_had_block=0
+  if grep -q 'quipu:start' "$_q_v/AGENTS.md"; then
+    _q_had_block=1
+  fi
+  printf '%s\n' '## quipu' 'Run: quipu context' | awk -f "$_q_HOME/lib/block.awk" "$_q_v/AGENTS.md" > "$_q_v/.quipu/agents.tmp" && mv "$_q_v/.quipu/agents.tmp" "$_q_v/AGENTS.md"
+
+  if [ "$_q_changed" -eq 0 ] && [ "$_q_had_block" -eq 1 ]; then
+    _q_msg init_idem
+  else
+    # shellcheck disable=SC2059
+    printf "$(_q_msg init_ok)\n" "$_q_v"
+    if [ "$_q_git" -eq 1 ]; then
+      _q_msg init_git
+    fi
+    if [ -n "$_q_lang" ]; then
+      # shellcheck disable=SC2059
+      printf "$(_q_msg init_lang)\n" "$_q_lang"
+    fi
+    if [ "$_q_had_block" -eq 0 ]; then
+      _q_msg init_agents
+    fi
+  fi
+}
+
+# ---- context ----------------------------------------------------------------
+
+_q_cmd_context() {
+  _q_ev=
+  _q_limit=10
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --json) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_ev=$2; shift 2 ;;
+      --limit) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_limit=$2; shift 2 ;;
+      *) _q_die err_missing_arg 2 ;;
+    esac
+  done
+
+  _q_v=$(_q_vault)
+  if [ -z "$_q_v" ]; then
+    _q_die err_no_vault
+  fi
+
+  _q_text=
+  _q_ctx_add() {
+    _q_text="${_q_text}${1}
+"
+  }
+
+  _q_ctx_add "$(_q_msg ctx_activity)"
+
+  _q_log="$_q_v/.quipu/activity.log"
+  if [ -s "$_q_log" ]; then
+    _q_ctx_add "$(awk -v n="$_q_limit" '{ line[NR] = $0 } END { s = NR - n + 1; if (s < 1) s = 1; for (i = s; i <= NR; i++) print line[i] }' "$_q_log")"
+    _q_ctx_add "$(awk '
+{
+  s = $0
+  p = index(s, " | ")
+  if (p == 0) next
+  s = substr(s, p + 3)
+  p = index(s, " | ")
+  if (p == 0) next
+  s = substr(s, p + 3)
+  p = index(s, " | ")
+  if (p == 0) next
+  tool = substr(s, 1, p - 1)
+  path = substr(s, p + 3)
+  if (path == "") next
+  cnt[path]++
+  lasttool[path] = tool
+}
+END {
+  for (path in cnt) printf "%s\t%s\t%s\n", path, cnt[path], lasttool[path]
+}
+' "$_q_log")"
+  else
+    _q_ctx_add "$(_q_msg ctx_empty)"
+  fi
+
+  if [ -f "$_q_v/Threads.md" ]; then
+    _q_ctx_add "$(_q_msg ctx_threads)"
+    _q_ctx_add "$(cat "$_q_v/Threads.md")"
+  fi
+
+  _q_ctx_add "$(_q_msg ctx_index)"
+  if [ -f "$_q_v/.quipu/index.tsv" ]; then
+    _q_ctx_add "$(wc -l < "$_q_v/.quipu/index.tsv" | tr -d ' ')"
+  else
+    _q_ctx_add "0"
+  fi
+
+  if [ -n "$_q_ev" ]; then
+    # Context via stdin, not -v: awk -v processes escape sequences and
+    # would corrupt Windows paths (C:\Users\...). JE_EV is a plain event
+    # name, safe as -v.
+    printf '%s' "$_q_text" | awk -v JE_EV="$_q_ev" -f "$_q_HOME/lib/jsonemit.awk" -f "$_q_HOME/lib/emit_hookctx.awk"
+  else
+    printf '%s' "$_q_text"
+  fi
+}
+
+# ---- index ------------------------------------------------------------------
+
+_q_cmd_index() {
+  _q_full=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --full) _q_full=1 ;;
+      *) usage; exit 2 ;;
+    esac
+    shift
+  done
+
+  _q_v=$(_q_vault)
+  if [ -z "$_q_v" ]; then
+    _q_die err_no_vault
+  fi
+
+  _q_prof=
+  if [ -f "$_q_v/.quipu/config" ]; then
+    _q_prof=$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+  fi
+  if [ -z "$_q_prof" ]; then
+    if [ "$(_q_lang)" = tr ]; then
+      _q_prof='tr'
+    else
+      _q_prof=default
+    fi
+  fi
+
+  _q_tmp=$(mktemp -d "${TMPDIR:-/tmp}/quipu-index-XXXXXX") || exit 1
+  trap 'rm -rf "$_q_tmp"' EXIT HUP INT TERM
+
+  _q_old="$_q_tmp/old.tsv"
+  if [ "$_q_full" -eq 1 ] || [ ! -f "$_q_v/.quipu/index.tsv" ]; then
+    : > "$_q_old"
+  else
+    cp "$_q_v/.quipu/index.tsv" "$_q_old"
+  fi
+
+  (cd "$_q_v" && find . \( -name .git -o -name .quipu -o -name node_modules \) -prune -o -type f -name '*.md' -print) | sed 's|^\./||' | awk '$0 != "AGENTS.md"' > "$_q_tmp/all.txt"
+
+  if [ "$_q_full" -eq 1 ] || [ ! -f "$_q_v/.quipu/index.tsv" ]; then
+    cp "$_q_tmp/all.txt" "$_q_tmp/changed.txt"
+  else
+    (cd "$_q_v" && find . \( -name .git -o -name .quipu -o -name node_modules \) -prune -o -type f -name '*.md' -newer .quipu/index.tsv -print) | sed 's|^\./||' | awk '$0 != "AGENTS.md"' > "$_q_tmp/changed.txt"
+  fi
+
+  (cd "$_q_v" && while IFS= read -r _q_p; do printf '%s\t%s\n' "$_q_p" "$(mtime "$_q_p")"; done < "$_q_tmp/changed.txt") > "$_q_tmp/cur.txt"
+
+  awk -v mode=plan -v oldfile="$_q_tmp/old.tsv" -v allfile="$_q_tmp/all.txt" -f "$_q_HOME/lib/index.awk" "$_q_tmp/old.tsv" "$_q_tmp/cur.txt" "$_q_tmp/all.txt" > "$_q_tmp/plan.txt"
+
+  N=0
+  R=0
+  S=0
+  D=0
+  _q_tab=$(printf '\t')
+  : > "$_q_tmp/idx.tmp"
+  while IFS="$_q_tab" read -r _q_verb _q_rest; do
+    case "$_q_verb" in
+      reuse|carry)
+        printf '%s\n' "$_q_rest"
+        R=$((R + 1))
+        ;;
+      stale)
+        _q_p=${_q_rest%%"$_q_tab"*}
+        _q_mt=${_q_rest#*"$_q_tab"}
+        _q_meta=$(cd "$_q_v" && awk -v mode=meta -f "$_q_HOME/lib/index.awk" "$_q_p")
+        # shellcheck disable=SC2018,SC2019
+        _q_flat=$(cd "$_q_v" && sed -f "$_q_HOME/fold/$_q_prof.sed" "$_q_p" | tr 'A-Z' 'a-z' | awk -v mode=flat -v max=2000 -f "$_q_HOME/lib/index.awk")
+        printf '%s\t%s\t%s\t%s\n' "$_q_p" "$_q_meta" "$_q_mt" "$_q_flat"
+        S=$((S + 1))
+        ;;
+      drop)
+        D=$((D + 1))
+        ;;
+    esac
+  done < "$_q_tmp/plan.txt" > "$_q_tmp/idx.tmp"
+
+  N=$((R + S))
+  mv "$_q_tmp/idx.tmp" "$_q_v/.quipu/index.tsv"
+
+  _q_fmt=$(_q_msg idx_summary)
+  # shellcheck disable=SC2059
+  printf "$_q_fmt" "$N" "$R" "$S" "$D"
+  printf '\n'
+}
+
+# ---- search -----------------------------------------------------------------
+
+_q_cmd_search() {
+  _q_limit=10
+  _q_paths=0
+  _q_query=
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --limit) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_limit=$2; shift 2 ;;
+      --paths) _q_paths=1; shift ;;
+      *)
+        if [ -n "$_q_query" ]; then
+          _q_query="$_q_query $1"
+        else
+          _q_query=$1
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  _q_v=$(_q_vault)
+
+  # Fold profile: config fold= -> language tr -> tr -> default (same chain
+  # and same fallback as `quipu index`).
+  _q_prof=
+  if [ -n "$_q_v" ] && [ -f "$_q_v/.quipu/config" ]; then
+    _q_prof=$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+  fi
+  if [ -z "$_q_prof" ]; then
+    if [ "$(_q_lang)" = tr ]; then
+      _q_prof='tr'
+    else
+      _q_prof=default
+    fi
+  fi
+
+  # Fold the query with the same profile and order as the index (PLAN 4.3):
+  # sed -f fold/PROFIL.sed, THEN tr 'A-Z' 'a-z'. SC2018/SC2019 suggest
+  # [:upper:]/[:lower:], but BSD tr is byte-based; after folding, plain ASCII
+  # ranges are safe on every platform.
+  # shellcheck disable=SC2018,SC2019
+  _q_terms=$(printf '%s\n' "$_q_query" | sed -f "$_q_HOME/fold/$_q_prof.sed" | tr 'A-Z' 'a-z')
+  [ -n "$_q_terms" ] || _q_die err_empty_query 2
+
+  [ -n "$_q_v" ] || _q_die err_no_vault
+  [ -f "$_q_v/.quipu/index.tsv" ] || _q_die err_no_index
+
+  _q_tab=$(printf '\t')
+  awk -v mode=bm25 -v terms="$_q_terms" -f "$_q_HOME/lib/search.awk" "$_q_v/.quipu/index.tsv" \
+    | sort -k1,1nr -k4,4nr \
+    | head -n "$_q_limit" \
+    | awk -v p="$_q_paths" -F "$_q_tab" '{ if (p == 1) print $2; else print $0 }'
+}
+
+# ---- dispatch ---------------------------------------------------------------
+
+_q_cmd=${1:-}
+case "$_q_cmd" in
+  --version) printf 'quipu 0.1.0\n'; exit 0 ;;
+  doctor) _q_doctor ;;
+  index) shift; _q_cmd_index "$@" ;;
+  capture) shift; _q_cmd_capture "$@" ;;
+  init) shift; _q_cmd_init "$@" ;;
+  context) shift; _q_cmd_context "$@" ;;
+  search) shift; _q_cmd_search "$@" ;;
+  *) usage; exit 2 ;;
+esac
