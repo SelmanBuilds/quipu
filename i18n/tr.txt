@@ -37,6 +37,8 @@ doc_layout=yerleşim
 doc_layout_missing=config'te layout= değeri yok (çalıştır: quipu init)
 doc_companion_missing=companion.md yok (çalıştır: quipu init)
 doc_onedrive_vault=vault yolu OneDrive içeriyor (emoji klasör riski, plan 4.9)
+doc_hooks_installed=kurulu
+doc_hooks_missing=kurulu değil
 # index
 idx_summary=# indekslendi %d (yeniden %d, bayat %d, düştü %d)
 # search
@@ -58,6 +60,16 @@ ctx_activity=son etkinlik
 ctx_threads=konular
 ctx_index=indeks istatistiği
 ctx_empty=henüz hafıza yok
+ctx_truncated=… (kırpıldı)
+ctx_precompact=Bağlam sıkışabilir: hafızanı şimdi yaz — Threads.md'yi güncelle ve %s klasörüne bugünkü oturum özetini ekle.
+# remember
+usage_remember=  remember  activity.log'dan mekanik sindirim yaz (append-only)
+remember_ok=yazıldı: %s
+remember_empty=hatırlanacak yeni satır yok
+remember_git=git commit atıldı
+digest_range=Aralık: %s → %s (%d olay)
+digest_tools=Araçlar: %s
+digest_files=Dokunulan dosyalar (en çok %d):
 # bridge
 bridge_run=Çalıştır: quipu context
 bridge_layout=Yerleşim:

@@ -83,6 +83,9 @@ _q_msg() {
 
 _q_die() {
   _q_msg "$1" >&2
+  if [ "${QUIPU_HOOK:-0}" = 1 ]; then
+    exit 0
+  fi
   exit "${2:-1}"
 }
 
@@ -109,6 +112,7 @@ usage() {
   _q_msg usage_search
   _q_msg usage_init
   _q_msg usage_context
+  _q_msg usage_remember
 }
 
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
@@ -225,8 +229,10 @@ _q_doctor() {
   fi
 
   _q_msg doc_sec_agents
-  if [ -e "$HOME/.claude/settings.json" ]; then
-    _q_line ok claude "$HOME/.claude/settings.json"
+  if [ -e "$HOME/.claude/settings.json" ] && grep -q quipu "$HOME/.claude/settings.json"; then
+    _q_line ok 'claude hooks' "$(_q_msg doc_hooks_installed)"
+  else
+    _q_line warn 'claude hooks' "$(_q_msg doc_hooks_missing)"
   fi
   if [ -e "$HOME/.codex/config.toml" ]; then
     _q_line ok codex "$HOME/.codex/config.toml"
@@ -322,7 +328,23 @@ _q_cmd_capture() {
     fi
   fi
 
-  # Path: make it vault-relative when inside the vault, then strip TAB/CR/LF.
+  # Path: Windows-form paths (drive letter, backslashes) arrive from
+  # Claude Code on Windows. Convert to POSIX; if the result lives inside
+  # the vault it is made vault-relative so digests stay portable. Paths
+  # outside the vault keep their exact original bytes (already absolute).
+  case "$_q_p" in
+    [A-Za-z]:*)
+      if command -v cygpath >/dev/null 2>&1; then
+        _q_orig=$_q_p
+        _q_p=$(cygpath -u "$_q_p" 2>/dev/null || printf '%s\n' "$_q_p")
+        case "$_q_p" in
+          "$_q_v"/*) : ;;
+          *) _q_p=$_q_orig ;;
+        esac
+      fi
+      ;;
+  esac
+  # Make it vault-relative when inside the vault, then strip TAB/CR/LF.
   _q_p=${_q_p#"$_q_v"/}
   _q_tab=$(printf '\t')
   _q_p=$(printf '%s\n' "$_q_p" | tr -d "$_q_tab$(printf '\r\n')")
@@ -532,52 +554,101 @@ _q_cmd_context() {
     _q_die err_no_vault
   fi
 
-  _q_text=
-  _q_ctx_add() {
-    _q_text="${_q_text}${1}
+  _q_log="$_q_v/.quipu/activity.log"
+
+  # Fixed part A: activity section (tail lines + per-path digest table).
+  _q_act=
+  _q_add_act() {
+    _q_act="${_q_act}${1}
 "
   }
-
-  _q_ctx_add "$(_q_msg ctx_activity)"
-
-  _q_log="$_q_v/.quipu/activity.log"
+  _q_add_act "$(_q_msg ctx_activity)"
   if [ -s "$_q_log" ]; then
-    _q_ctx_add "$(awk -v n="$_q_limit" '{ line[NR] = $0 } END { s = NR - n + 1; if (s < 1) s = 1; for (i = s; i <= NR; i++) print line[i] }' "$_q_log")"
-    _q_ctx_add "$(awk '
-{
-  s = $0
-  p = index(s, " | ")
-  if (p == 0) next
-  s = substr(s, p + 3)
-  p = index(s, " | ")
-  if (p == 0) next
-  s = substr(s, p + 3)
-  p = index(s, " | ")
-  if (p == 0) next
-  tool = substr(s, 1, p - 1)
-  path = substr(s, p + 3)
-  if (path == "") next
-  cnt[path]++
-  lasttool[path] = tool
-}
-END {
-  for (path in cnt) printf "%s\t%s\t%s\n", path, cnt[path], lasttool[path]
-}
-' "$_q_log")"
+    _q_add_act "$(awk -v n="$_q_limit" '{ line[NR] = $0 } END { s = NR - n + 1; if (s < 1) s = 1; for (i = s; i <= NR; i++) print line[i] }' "$_q_log")"
+    _q_add_act "$(awk -f "$_q_HOME/lib/digest.awk" "$_q_log")"
   else
-    _q_ctx_add "$(_q_msg ctx_empty)"
+    _q_add_act "$(_q_msg ctx_empty)"
   fi
 
-  if [ -f "$_q_v/Threads.md" ]; then
-    _q_ctx_add "$(_q_msg ctx_threads)"
-    _q_ctx_add "$(cat "$_q_v/Threads.md")"
-  fi
-
-  _q_ctx_add "$(_q_msg ctx_index)"
+  # Fixed part B: index stats section.
+  _q_idx=
+  _q_add_idx() {
+    _q_idx="${_q_idx}${1}
+"
+  }
+  _q_add_idx "$(_q_msg ctx_index)"
   if [ -f "$_q_v/.quipu/index.tsv" ]; then
-    _q_ctx_add "$(wc -l < "$_q_v/.quipu/index.tsv" | tr -d ' ')"
+    _q_add_idx "$(wc -l < "$_q_v/.quipu/index.tsv" | tr -d ' ')"
   else
-    _q_ctx_add "0"
+    _q_add_idx "0"
+  fi
+
+  # Variable part: Threads.md section (ctx_threads header + file content),
+  # bounded to QUIPU_CTX_MAX bytes (C-16) at whole-line boundaries (C-17).
+  _q_thr=
+  if [ -f "$_q_v/Threads.md" ]; then
+    _q_hdr=$(_q_msg ctx_threads)
+    _q_marker=$(_q_msg ctx_truncated)
+    _q_max=${QUIPU_CTX_MAX:-4096}
+    _q_fixed=$(printf '%s%s' "$_q_act" "$_q_idx" | LC_ALL=C wc -c | tr -d ' ')
+    _q_msize=$(printf '%s\n' "$_q_marker" | LC_ALL=C wc -c | tr -d ' ')
+    _q_budget=$((_q_max - _q_fixed - _q_msize))
+    _q_thr=$( {
+      printf '%s\n' "$_q_marker"
+      printf '%s\n' "$_q_hdr"
+      cat "$_q_v/Threads.md"
+    } | LC_ALL=C awk -v budget="$_q_budget" '
+      NR == 1 { m = $0; next }
+      cut { next }
+      {
+        n = length($0)
+        if (acc + n + 1 > budget) { cut = 1; next }
+        acc += n + 1
+        print
+      }
+      END { if (cut) print m }
+    ')
+  fi
+
+  if [ -n "$_q_thr" ]; then
+    _q_text="$_q_act$_q_thr
+$_q_idx"
+  else
+    _q_text="$_q_act$_q_idx"
+  fi
+
+  # Nudge (C-19/C-20): only --json UserPromptSubmit, once more than
+  # QUIPU_NUDGE_AFTER lines accumulate past the watermarks.
+  if [ -n "$_q_ev" ] && [ "$_q_ev" = UserPromptSubmit ] && [ -s "$_q_log" ]; then
+    _q_nudge_after=${QUIPU_NUDGE_AFTER:-50}
+    _q_total=$(wc -l < "$_q_log" | tr -d ' ')
+    _q_last=0
+    for _q_w in "$_q_v/.quipu/remembered" "$_q_v/.quipu/nudged"; do
+      if [ -s "$_q_w" ]; then
+        _q_pos=$(awk 'NR == 1 { wm = $0; next } $0 == wm { last = FNR } END { print (last + 0) }' "$_q_w" "$_q_log")
+        if [ "$_q_pos" -gt "$_q_last" ]; then
+          _q_last=$_q_pos
+        fi
+      fi
+    done
+    if [ $((_q_total - _q_last)) -gt "$_q_nudge_after" ]; then
+      _q_lay=
+      if [ -f "$_q_v/.quipu/config" ]; then
+        _q_lay=$(awk -F= -v k=layout '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+      fi
+      case "$_q_lay" in
+        emoji|plain) : ;;
+        *) _q_lay=emoji ;;
+      esac
+      _q_tab=$(printf '\t')
+      _q_sess=$(awk -F"$_q_tab" '$1=="sessions"{print $2;exit}' "$_q_HOME/layout/$_q_lay.txt" 2>/dev/null || true)
+      # shellcheck disable=SC2059
+      _q_nudge=$(printf "$(_q_msg ctx_precompact)" "$_q_sess")
+      _q_text="${_q_text}${_q_nudge}
+"
+      _q_lastline=$(awk 'END { print $0 }' "$_q_log")
+      printf '%s\n' "$_q_lastline" > "$_q_v/.quipu/nudged"
+    fi
   fi
 
   if [ -n "$_q_ev" ]; then
@@ -588,6 +659,109 @@ END {
   else
     printf '%s' "$_q_text"
   fi
+}
+
+# ---- remember ---------------------------------------------------------------
+
+_q_cmd_remember() {
+  _q_git=0
+  _q_dry=0
+  _q_limit=10
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --git) _q_git=1; shift ;;
+      --dry-run) _q_dry=1; shift ;;
+      --limit) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_limit=$2; shift 2 ;;
+      *) _q_die err_missing_arg 2 ;;
+    esac
+  done
+
+  _q_v=$(_q_vault)
+  if [ -z "$_q_v" ]; then
+    _q_die err_no_vault
+  fi
+
+  _q_tab=$(printf '\t')
+  _q_log="$_q_v/.quipu/activity.log"
+  _q_wm="$_q_v/.quipu/remembered"
+
+  # Slice: the lines AFTER the last occurrence of the watermark line (C-7).
+  # The watermark is user data, so it flows via a file argument, never -v.
+  if [ -s "$_q_wm" ]; then
+    _q_slice=$(awk 'NR == 1 { wm = $0; next } { if ($0 == wm) last = NR; line[NR] = $0 } END { if (last) { for (i = last + 1; i <= NR; i++) print line[i] } else { for (i = 2; i <= NR; i++) print line[i] } }' "$_q_wm" "$_q_log")
+  else
+    _q_slice=$(cat "$_q_log" 2>/dev/null || true)
+  fi
+
+  if [ -z "$_q_slice" ]; then
+    _q_msg remember_empty
+    exit 0
+  fi
+
+  _q_digest=$(printf '%s\n' "$_q_slice" | awk -v mode=digest -f "$_q_HOME/lib/digest.awk")
+  _q_last=$(printf '%s\n' "$_q_slice" | awk 'END{print}')
+
+  _q_first=$(printf '%s\n' "$_q_digest" | awk -F"$_q_tab" '$1=="RANGE"{print $2; exit}')
+  _q_lastts=$(printf '%s\n' "$_q_digest" | awk -F"$_q_tab" '$1=="RANGE"{print $3; exit}')
+  _q_count=$(printf '%s\n' "$_q_digest" | awk -F"$_q_tab" '$1=="RANGE"{print $4; exit}')
+
+  _q_tools=$(printf '%s\n' "$_q_digest" | awk -F"$_q_tab" 'BEGIN{OFS=sprintf("%c",9)} $1=="TOOL"{print $2, $3}' | sort -t "$_q_tab" -k2,2nr | awk -F"$_q_tab" '{ if (first) printf ", "; printf "%s %s", $1, $2; first=1 }')
+
+  _q_layout=
+  if [ -f "$_q_v/.quipu/config" ]; then
+    _q_layout=$(awk -F= -v k=layout '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+  fi
+  if [ -z "$_q_layout" ]; then
+    _q_layout=emoji
+  fi
+  _q_sessions=$(awk -F"$_q_tab" '$1=="sessions"{print $2;exit}' "$_q_HOME/layout/$_q_layout.txt" 2>/dev/null || true)
+
+  _q_day=$(date +%Y-%m-%d)
+  _q_rel="$_q_sessions/$_q_day.md"
+  _q_now=$(date +%H:%M)
+
+  _q_body=$(mktemp "${TMPDIR:-/tmp}/quipu-remember-XXXXXX") || exit 1
+  trap 'rm -f "$_q_body"' EXIT HUP INT TERM
+  {
+    printf '## %s\n' "$_q_now"
+    # shellcheck disable=SC2059
+    printf "$(_q_msg digest_range)\n" "$_q_first" "$_q_lastts" "$_q_count"
+    # shellcheck disable=SC2059
+    printf "$(_q_msg digest_tools)\n" "$_q_tools"
+    # shellcheck disable=SC2059
+    printf "$(_q_msg digest_files)\n" "$_q_limit"
+    printf '%s\n' "$_q_digest" | awk -F"$_q_tab" 'BEGIN{OFS=sprintf("%c",9)} $1=="FILE"{print $2, $3}' | sort -t "$_q_tab" -k2,2nr | head -n "$_q_limit" | while IFS="$_q_tab" read -r _q_p _q_c; do
+      printf '  - %2d  %s\n' "$_q_c" "$_q_p"
+    done
+  } > "$_q_body"
+
+  if [ "$_q_dry" -eq 1 ]; then
+    cat "$_q_body"
+    exit 0
+  fi
+
+  mkdir -p "$_q_v/$_q_sessions"
+  cat "$_q_body" >> "$_q_v/$_q_rel"
+
+  _q_ls_body="$_q_day · $_q_count events · $_q_rel"
+  : >> "$_q_v/Last-Session.md"
+  printf '%s\n' "$_q_ls_body" | awk -f "$_q_HOME/lib/block.awk" "$_q_v/Last-Session.md" > "$_q_v/.quipu/lastsession.tmp" && mv "$_q_v/.quipu/lastsession.tmp" "$_q_v/Last-Session.md"
+
+  printf '%s\n' "$_q_last" > "$_q_wm"
+
+  if [ "$_q_git" -eq 1 ] && command -v git >/dev/null 2>&1; then
+    if (cd "$_q_v" && git rev-parse --git-dir >/dev/null 2>&1); then
+      if (cd "$_q_v" && git add -A && ! git diff --cached --quiet); then
+        if (cd "$_q_v" && git commit -m "quipu: $_q_day" >/dev/null); then
+          _q_msg remember_git
+        fi
+      fi
+    fi
+  fi
+
+  # shellcheck disable=SC2059
+  printf "$(_q_msg remember_ok)\n" "$_q_rel"
 }
 
 # ---- index ------------------------------------------------------------------
@@ -742,6 +916,7 @@ case "$_q_cmd" in
   capture) shift; _q_cmd_capture "$@" ;;
   init) shift; _q_cmd_init "$@" ;;
   context) shift; _q_cmd_context "$@" ;;
+  remember) shift; _q_cmd_remember "$@" ;;
   search) shift; _q_cmd_search "$@" ;;
   *) usage; exit 2 ;;
 esac

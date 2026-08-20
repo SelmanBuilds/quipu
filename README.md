@@ -30,6 +30,7 @@ quipu capture   # append one line to activity.log (reads a bounded prefix)
 quipu index     # build/refresh .quipu/index.tsv (incremental)
 quipu search    # folded lexical search + BM25
 quipu context   # recent-session context; --json EVENT emits the hook envelope
+quipu remember  # mechanical digest: activity.log → <sessions>/YYYY-MM-DD.md + Last-Session.md pointer (--dry-run/--git/--limit)
 ```
 
 ## End-to-end example
@@ -59,12 +60,67 @@ $ quipu doctor; echo $?
 
 Outputs are Turkish because the vault was initialized with `--lang tr`.
 
+## Claude Code
+
+The `adapters/claude-code.json` adapter wires quipu into Claude Code's local hooks:
+`SessionStart` injects recent-session context, `PostToolUse` captures `Edit|Write|NotebookEdit|Read`
+events into `activity.log` (async, silent), `UserPromptSubmit` nudges the model to write memory
+once a staleness threshold is crossed, and `SessionEnd` (backed by a `SessionStart`-chained
+`remember`) writes the mechanical digest.
+
+Merge this `hooks` block into `~/.claude/settings.json` (identical to `adapters/claude-code.json`,
+which you can also copy):
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "shell": "bash",
+                     "command": "QUIPU_HOOK=1 quipu remember && QUIPU_HOOK=1 quipu context --json SessionStart",
+                     "timeout": 10 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "shell": "bash",
+                     "command": "QUIPU_HOOK=1 quipu context --json UserPromptSubmit",
+                     "timeout": 10 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Edit|Write|NotebookEdit|Read",
+        "hooks": [ { "type": "command", "shell": "bash",
+                     "command": "QUIPU_HOOK=1 quipu capture",
+                     "timeout": 10, "async": true } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "shell": "bash",
+                     "command": "QUIPU_HOOK=1 quipu remember",
+                     "timeout": 30 } ] }
+    ]
+  }
+}
+```
+
+`quipu` must be on your `PATH` for the hooks. On Windows, Git for Windows puts only
+`cmd/` on `PATH` — if a hook reports `Executable not found in $PATH: bash`, add
+`C:\Program Files\Git\bin` to `PATH` (or write the absolute bash path in the `shell` field).
+
+If `quipu` is not on `PATH`, write its absolute path in each `command`. The cygpath
+conversion pattern for Windows is documented in PLAN §4.7 — it is **not** embedded in
+the adapter.
+
+**Restart Claude Code after editing `settings.json` — hook configuration is not loaded
+into a running session.**
+
+`quipu remember --git` auto-commits the vault (`--git` is opt-in; the adapter never
+commits by itself).
+
+Env knobs: `QUIPU_CTX_MAX`, `QUIPU_NUDGE_AFTER`, `QUIPU_LOG_MAX`, `QUIPU_HOOK`.
+
 ## Status
 
-FAZ 1 and FAZ 2 are complete: the six-command CLI, primitives, three-OS CI matrix, and
-five-folder vault taxonomy (emoji by default, `--plain` for ASCII) with seeded
-`companion.md` + `Threads.md` and the `AGENTS.md`/`CLAUDE.md` bridge blocks.
-FAZ 3 — the Claude Code adapter — is next. See [docs/PLAN.md](docs/PLAN.md).
+FAZ 1-3 complete: the seven-command CLI (doctor, init, capture, index, search,
+context, remember), three-OS CI, five-folder vault taxonomy, and the Claude Code
+adapter (`adapters/claude-code.json` — hooks only, no installer). FAZ 4 — Codex,
+OpenCode, Cursor/Windsurf adapters — is next. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Honest limits
 

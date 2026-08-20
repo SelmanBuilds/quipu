@@ -5,7 +5,7 @@
 > Buradaki tüm teknik bulgular **ölçülmüş ve doğrulanmıştır** — tahmin değildir.
 > Kanıtlar "Doğrulanmış Bulgular" bölümünde, yeniden üretme komutlarıyla birlikte.
 >
-> **Tarih:** 2026-08-20 · **Durum:** FAZ 2 tamam — altı komutlu CLI + vault taksonomisi, üç OS CI yeşil. FAZ 3 sırada.
+> **Tarih:** 2026-08-20 · **Durum:** FAZ 3 tamam — Claude Code adaptörü (referans uygulama) + `quipu remember`; üç OS CI PR'a kaldı. FAZ 4 sırada.
 > **İsim notu:** `quipu` seçildi. Değiştirmek istersen tüm dosyada tek find/replace yeter.
 
 ---
@@ -355,8 +355,32 @@ printf '[🔮 850-Companion]\n' | awk 'index($0, "🔮") {print "hit"}'      # h
 
 > **KURAL:** Çok baytlı bir dizgeyi metinde ararken `grep` kullanma; `awk index()` kullan.
 > ASCII dizgeler için `grep` güvenlidir.
----
 
+### 4.18 FAZ 3 ölçümü: `PreCompact` çıktısı modele ULAŞMIYOR; `SessionEnd` güvenilmez (FAZ 3 · E-0)
+
+Claude Code 2.1.237 üzerinde canlı ölçüldü (`docs/FAZ3-BULGULAR.md`'de tüm
+payload'lar ve yeniden üretme yolları):
+
+1. **`PreCompact` tetikleniyor ama çıktısı bağlama girmiyor.** `trigger:"auto"`
+   payload'ı yakalandı; aynı oturumda modele soruldu: `SessionStart` zarfı görünüyor,
+   `PreCompact` zarfı **hiç görünmüyor** — sıkıştırmadan hemen sonra bile.
+   → FAZ 3 talimat mekanizması `UserPromptSubmit` + bayatlık eşiği üzerine kuruldu.
+2. **`SessionEnd` güvenilmez:** print modunda, `/exit`'te ve kill'de hiç ateşlenmiyor;
+   `/clear` geçişinde (`reason:"clear"`) ve bazı temiz bitişlerde (`reason:"other"`)
+   ateşleniyor. → `quipu remember` adaptörde `SessionStart` zincirinde de koşuyor
+   (filigran idempotent yapıyor).
+3. **`SessionStart source` değerleri:** `startup | resume | clear | compact` — dördü
+   de canlı ölçüldü. `compact` her otomatik sıkıştırma sonrası yeniden ateşleniyor ve
+   bağlam enjeksiyonu o anda da çalışıyor.
+4. **Async hook çıktısı bağlama "system-reminder" olarak giriyor** → adaptörün
+   `PostToolUse` hook'u (`quipu capture`) stdout'a hiçbir şey yazmaz; gürültü sıfır.
+5. **Windows hook spawn PATH'i `bash`'i bulamıyor** (Git yalnız `cmd` dizinini PATH'e
+   koyar) → "Executable not found in $PATH: bash" (non-blocking, oturum devam eder).
+   README'ye Git `bin` PATH notu eklendi.
+6. **Hook `env` anahtarı yok** (iki mekanizma da ölçüldü) → adaptör komutları
+   `QUIPU_HOOK=1 quipu …` biçiminde.
+
+---
 ## 5. Ajan entegrasyon yüzeyleri
 
 claude-mem'in kaynak kodundan çıkarıldı (`src/services/integrations/`).
@@ -495,11 +519,19 @@ Lisans ilk commit'ten önce seçilmeli (avenoxbeyin MIT, claude-mem Apache-2.0).
 - `AGENTS.md` (evrensel) + `CLAUDE.md` (ona işaret eden ince dosya)
 - Companion persona **veri olarak** (`companion.md`), kod değil → dil paketi gibi değiştirilebilir
 
-### FAZ 3 — Claude Code adaptörü (referans uygulama)
-- `SessionStart` → bağlam enjeksiyonu (**JSON zarfı**, `lib/jsonemit.awk` — bkz. §4.5)
-- `PostToolUse` (async) → `quipu capture`
-- `PreCompact` → "şimdi hafızayı yaz" uyarısı
-- `SessionEnd` → append-only özet + `git commit`
+### FAZ 3 — Claude Code adaptörü (referans uygulama) ✅
+- `SessionStart` → `quipu remember` + bağlam enjeksiyonu (`quipu context --json SessionStart`)
+- `PostToolUse` (async) → `quipu capture` (matcher `Edit|Write|NotebookEdit|Read`)
+- `UserPromptSubmit` → bayatlık nudge'ı (`quipu context --json UserPromptSubmit`)
+- `SessionEnd` → `quipu remember` (mekanik sindirim, filigran idempotent)
+
+Tamamlandı (2026-08-20): `quipu remember` + filigran (`.quipu/remembered`, append-only
+`<sessions>/YYYY-MM-DD.md`, `Last-Session.md` işaretçisi, `--dry-run/--git/--limit`), ortak
+toplayıcı `lib/digest.awk`, `context` çıktı sınırı (`QUIPU_CTX_MAX`, varsayılan 4096) +
+`UserPromptSubmit` bayatlık nudge'ı (`QUIPU_NUDGE_AFTER`, varsayılan 50, `.quipu/nudged`) —
+**PreCompact dalı ölçümle düştü: çıktı modele ulaşmıyor (§4.18)** —, `adapters/claude-code.json`,
+`doctor` hook kontrolü, `QUIPU_HOOK` sessiz-başarı bayrağı, README "Claude Code" bölümü;
+testler 117 → 154. Üç OS CI notu PR'a kaldı (**PR pending**).
 
 ### FAZ 4 — Diğer adaptörler
 Codex → OpenCode → Cursor/Windsurf. Her biri **sadece bir yapılandırma dosyası** olmalı;
@@ -528,10 +560,11 @@ POSIX uyumu) tekrarlanmaz.
 | Risk | Not |
 |---|---|
 | ~~`PostToolUse` şeması doğrulanmadı~~ | ✅ **KAPANDI** — FAZ 0'da gerçek payload'la doğrulandı (§4.12) |
+| PreCompact enjeksiyonu | ✅ **KAPANDI** — FAZ 3'te canlı ölçüldü: `PreCompact` çıktısı modele **ulaşmıyor** (§4.18); talimat `UserPromptSubmit` + bayatlık eşiğine taşındı (`QUIPU_NUDGE_AFTER`) |
 | `jsonfield` kapsamsız arama | `index(s,key)` tüm string'i tarar; `tool_response` içindeki literal `"file_path"` yanlış eşleşebilir. → `jsonfield_from` + sınırlı önek (§4.8) |
 | Büyük payload | Ölçülen örnek 458 KB (base64 `tool_response`). `capture` asla tüm stdin'i belleğe almamalı (§4.12) |
 | CRLF satır sonu | `*.sh text eol=lf` yoksa Windows'ta commit sırasında CRLF girer ve `#!/bin/sh` bozulur. → ✅ **KAPANDI** (Adım 2: `*.sh eol=lf`; Adım 3: uzantısız `quipu` için `/quipu text eol=lf`) |
-| Hook config sıcak yüklenmez | Adaptör testleri oturum yeniden başlatması gerektirir; kurulum betiği bunu söylemeli (§4.15) |
+| Hook config sıcak yüklenmez | Yapılandırma çalışan oturuma yüklenmez; README "Claude Code" bölümü yeniden başlatma uyarısını taşıyor (C-27, §4.15) |
 | İndeks bağlam sınırı | Semantik katman indeksi ajanın okumasına dayanır. Birkaç bin nota kadar rahat; ötesinde iki aşamalı daralt-sonra-oku gerekir. |
 | Başlık/etiket boost'u | Katlanmış terim ham başlıkla karşılaştırıldığı için ×2/×1.5 ağırlık yalnız ASCII başlıklarda ateşler. Geri çağırma etkilenmez (katlanmış alan başlığı zaten içerir), yalnız sıralama. |
 | Negatif IDF | Tek dokümanlı vault'ta BM25 IDF negatife düşer; `search.awk` bunu `matched` bayrağıyla telafi eder (dokümanın kendi duman testi bunu gerektiriyor). |
@@ -582,9 +615,16 @@ beş klasör + `.gitkeep`, `companion.md` ve `Threads.md` tohumları (yalnızca-
 doctor layout/companion/OneDrive kontrolleri; `docs/FAZ2-SPEC.md` sözleşmesi; inceleme sonrası
 düzeltmeler D1-D4 (`faz2` dalı → PR #2, `9831a36`); üç OS CI'sı yeşil; yerelde 117/117, shellcheck
 0.10.0 sessiz.
+FAZ 3 ✅ (2026-08-20) — Claude Code adaptörü (referans uygulama): `quipu remember` mekanik
+sindirimi (filigran `.quipu/remembered`, append-only `<sessions>/YYYY-MM-DD.md`,
+`Last-Session.md` işaretçisi, `--dry-run/--git/--limit`), ortak toplayıcı `lib/digest.awk`,
+`context` çıktı sınırı (`QUIPU_CTX_MAX`) + `UserPromptSubmit` bayatlık nudge'ı
+(`QUIPU_NUDGE_AFTER`) — PreCompact çıktısının modele ulaşmadığı ölçüldü (§4.18) —,
+`adapters/claude-code.json`, `doctor` hook kontrolü, `QUIPU_HOOK` sessiz-başarı bayrağı,
+README "Claude Code" bölümü; FAZ3-SPEC sözleşmesi C-1..C-36; yerelde 154/154, shellcheck sessiz;
+üç OS CI notu PR'a kaldı (**PR pending**).
 
-**Sıradaki:** FAZ 3: Claude Code adaptörü — `SessionStart` bağlam enjeksiyonu (JSON zarfı),
-`PostToolUse` capture, `SessionEnd` append-only özet + `git commit`.
+**Sıradaki:** FAZ 4: Codex → OpenCode → Cursor/Windsurf adaptörleri — her biri yalnızca bir yapılandırma dosyası.
 
 ### Çalışmaya başlarken
 1. Bu dosyayı ve `FAZ0-BULGULAR.md`'yi oku (ölçüm ayrıntıları orada).
