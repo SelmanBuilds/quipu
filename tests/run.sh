@@ -222,6 +222,27 @@ QUIPU_VAULT="$TMP/vcaprot" QUIPU_LOG_MAX=100 sh "$ROOT/quipu" capture --event Po
 assert_eq "capture: rotation creates activity.log.1" 'yes' "$([ -f "$TMP/vcaprot/.quipu/activity.log.1" ] && printf yes || printf no)"
 t; assert_eq "capture: rotated log keeps one line" '1' "$(awk 'END{print NR}' "$TMP/vcaprot/.quipu/activity.log")"
 t; assert_eq "capture: rotated log has latest entry" 'PostToolUse | Edit | two.md' "$(log_line "$TMP/vcaprot")"
+
+# ---- capture: multi-schema apply_patch (FAZ 4) ----
+
+mkvault vcodex
+t; QUIPU_VAULT="$TMP/vcodex" sh "$ROOT/quipu" capture < "$FIX/codex-apply-patch.json"
+assert_eq "capture: apply_patch single file logs one row" 'PostToolUse | apply_patch | alice/demo/not.md' "$(log_line "$TMP/vcodex")"
+
+mkvault vcodexm
+t; QUIPU_VAULT="$TMP/vcodexm" sh "$ROOT/quipu" capture < "$FIX/codex-apply-patch-multi.json"
+MLINES=$(awk '{ i=index($0," | "); print substr($0,i+3) }' "$TMP/vcodexm/.quipu/activity.log")
+assert_eq "capture: apply_patch multi logs exactly two byte-exact rows" 'PostToolUse | apply_patch | alice/demo/a.md
+PostToolUse | apply_patch | alice/demo/b.md' "$MLINES"
+
+mkvault vcodexd
+t; QUIPU_VAULT="$TMP/vcodexd" sh "$ROOT/quipu" capture < "$FIX/codex-apply-patch-delete.json"
+assert_eq "capture: apply_patch /dev/null logs no row" 'no' "$([ -s "$TMP/vcodexd/.quipu/activity.log" ] && printf yes || printf no)"
+
+mkvault vcodexr
+t; QUIPU_VAULT="$TMP/vcodexr" sh "$ROOT/quipu" capture < "$FIX/posttooluse.json"
+assert_eq "capture: Claude Code payload unchanged (regression)" 'PostToolUse | Read | C:\Users\alice\projects\demo\taskbar_overflow.png' "$(log_line "$TMP/vcodexr")"
+
 # ---- init + context ----
 
 t; QUIPU_VAULT="$TMP/vinit" sh "$ROOT/quipu" init --lang tr
@@ -744,6 +765,27 @@ printf '{}\n' > "$TMP/fakeh/.claude/settings.json"
 t; (cd "$TMP" && HOME="$TMP/fakeh" QUIPU_LANG=en sh "$ROOT/quipu" doctor) >"$TMP/fakeh2.out" 2>&1; RC=$?
 assert_eq "doctor: hooks not installed when settings lacks quipu" 'yes' \
   "$([ "$RC" -eq 0 ] && awk -F"$TAB" '$2=="claude hooks" && $3=="not installed" {f=1} END {exit !f}' "$TMP/fakeh2.out" && printf yes || printf no)"
+
+# ---- FAZ 4: codex adapter (data) + static checks (T-54..T-56) ----
+
+# T-54: four event keys present, no PreCompact (K-11).
+t; EVENTS=$(grep -cE '"(SessionStart|UserPromptSubmit|PostToolUse|SessionEnd)":' "$ROOT/adapters/codex/hooks.json")
+assert_eq "codex adapter: four events present, no PreCompact" 'yes' \
+  "$([ "$EVENTS" = 4 ] && ! grep -q 'PreCompact' "$ROOT/adapters/codex/hooks.json" && printf yes || printf no)"
+
+# T-55: no "shell" field, "env" key, conhost, cmd.exe, or .sh (K-14/K-16).
+t; BAD=$(grep -E '"shell"|"env"|conhost|cmd\.exe|\.sh' "$ROOT/adapters/codex/hooks.json")
+assert_eq "codex adapter: no shell/env/conhost/cmd.exe/.sh" '' "$BAD"
+
+# T-56: every command prefixed QUIPU_HOOK=1 quipu, commandWindows count matches,
+# "async": true exactly once, PostToolUse matcher is apply_patch (K-12/K-13/K-15).
+t; CMDS=$(grep -cE '"command":' "$ROOT/adapters/codex/hooks.json")
+WINS=$(grep -cE '"commandWindows":' "$ROOT/adapters/codex/hooks.json")
+PREFIXED=$(grep -cE '"command": "QUIPU_HOOK=1 quipu ' "$ROOT/adapters/codex/hooks.json")
+ASYNC=$(grep -c '"async": true' "$ROOT/adapters/codex/hooks.json")
+MATCHER=$(grep -c '"matcher": "apply_patch"' "$ROOT/adapters/codex/hooks.json")
+assert_eq "codex adapter: prefixed commands, windows parity, one async, apply_patch matcher" 'yes' \
+  "$([ "$CMDS" = 4 ] && [ "$WINS" = 4 ] && [ "$PREFIXED" = "$CMDS" ] && [ "$ASYNC" = 1 ] && [ "$MATCHER" = 1 ] && printf yes || printf no)"
 
 # ---- capture: Windows-form path normalization (FAZ 3, live layer finding) ----
 

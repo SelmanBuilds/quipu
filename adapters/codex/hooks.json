@@ -1,0 +1,30 @@
+{
+  "description": "quipu memory hooks for Codex CLI",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command",
+                     "command": "QUIPU_HOOK=1 quipu remember && QUIPU_HOOK=1 quipu context --json SessionStart",
+                     "commandWindows": "set QUIPU_HOOK=1&& quipu remember&& set QUIPU_HOOK=1&& quipu context --json SessionStart",
+                     "timeout": 10 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command",
+                     "command": "QUIPU_HOOK=1 quipu context --json UserPromptSubmit",
+                     "commandWindows": "set QUIPU_HOOK=1&& quipu context --json UserPromptSubmit",
+                     "timeout": 10 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "apply_patch",
+        "hooks": [ { "type": "command",
+                     "command": "QUIPU_HOOK=1 quipu capture",
+                     "commandWindows": "set QUIPU_HOOK=1&& quipu capture",
+                     "timeout": 10, "async": true } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command",
+                     "command": "QUIPU_HOOK=1 quipu remember",
+                     "commandWindows": "set QUIPU_HOOK=1&& quipu remember",
+                     "timeout": 3 } ] }
+    ]
+  }
+}

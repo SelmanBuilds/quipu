@@ -115,12 +115,37 @@ commits by itself).
 
 Env knobs: `QUIPU_CTX_MAX`, `QUIPU_NUDGE_AFTER`, `QUIPU_LOG_MAX`, `QUIPU_HOOK`.
 
+## Codex
+
+The `adapters/codex/hooks.json` adapter wires quipu into Codex CLI's local hooks:
+`SessionStart` chains `remember` + context injection, `UserPromptSubmit` nudges the model,
+`PostToolUse` captures `apply_patch` events into `activity.log` (async, silent), and
+`SessionEnd` runs the `remember` digest.
+
+Copy `adapters/codex/hooks.json` to `~/.codex/hooks.json` (global) or `.codex/hooks.json`
+(project-scoped). There is no installer. Hooks are **enabled by default** — no `config.toml`
+flag is required; to disable them, set `[features] hooks = false`.
+
+`quipu` must be on your `PATH` for the hooks.
+
+**Restart Codex after installing the hook file — hook configuration is read once at session
+setup; there is no watcher.**
+
+Windows: the `commandWindows` fields run under `cmd.exe /C` via the
+`set QUIPU_HOOK=1&& quipu …` pattern. A POSIX env prefix (`QUIPU_HOOK=1 quipu …`) is not
+valid in `cmd.exe`. This is not yet verified against a live Codex install.
+
+Honest limits: only `apply_patch` is captured. `Bash` commands and `Read` are not captured
+(Codex has no `Read` tool), and file deletions (`+++ /dev/null`) are skipped.
+
 ## Status
 
-FAZ 1-3 complete: the seven-command CLI (doctor, init, capture, index, search,
-context, remember), three-OS CI, five-folder vault taxonomy, and the Claude Code
-adapter (`adapters/claude-code.json` — hooks only, no installer). FAZ 4 — Codex,
-OpenCode, Cursor/Windsurf adapters — is next. See [docs/PLAN.md](docs/PLAN.md).
+FAZ 1-4 complete: the seven-command CLI (doctor, init, capture, index, search,
+context, remember), three-OS CI, five-folder vault taxonomy, the Claude Code
+adapter (`adapters/claude-code.json` — hooks only, no installer), multi-schema
+capture (agent-agnostic, dispatch by payload shape), and the Codex adapter
+(`adapters/codex/hooks.json` — config only, no installer). OpenCode, Cursor, and
+Windsurf adapters are postponed (2026-08-20). See [docs/PLAN.md](docs/PLAN.md).
 
 ## Honest limits
 
