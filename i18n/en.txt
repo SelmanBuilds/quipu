@@ -76,6 +76,8 @@ bridge_layout=Layout:
 bridge_companion=Companion persona: %s/companion.md
 bridge_append=Append-only: quipu never rewrites these files.
 bridge_claude=See AGENTS.md for vault layout and rules.
+bridge_updated=AGENTS.md context block updated
+err_conflict=options are mutually exclusive
 # layout
 layout_inbox=capture point for quick, unprocessed notes
 layout_projects=active work, one subfolder per project

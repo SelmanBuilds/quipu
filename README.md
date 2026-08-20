@@ -26,10 +26,10 @@ POSIX sh plus `sed`, `awk`, `grep`, `tr`, and `git`.
 ```
 quipu doctor    # environment diagnostics: tools present, agents installed, what's broken
 quipu init      # create .quipu/ + five layout folders + AGENTS.md/CLAUDE.md bridges (--plain: ASCII folder names)
-quipu capture   # append one line to activity.log (reads a bounded prefix)
+quipu capture   # append event line(s) to activity.log (stdin or --event/--tool/--path; --git: multi-line tree diff)
 quipu index     # build/refresh .quipu/index.tsv (incremental)
 quipu search    # folded lexical search + BM25
-quipu context   # recent-session context; --json EVENT emits the hook envelope
+quipu context   # recent-session context; --json EVENT emits the hook envelope; --bridge writes it to AGENTS.md
 quipu remember  # mechanical digest: activity.log → <sessions>/YYYY-MM-DD.md + Last-Session.md pointer (--dry-run/--git/--limit)
 ```
 
@@ -138,20 +138,41 @@ valid in `cmd.exe`. This is not yet verified against a live Codex install.
 Honest limits: only `apply_patch` is captured. `Bash` commands and `Read` are not captured
 (Codex has no `Read` tool), and file deletions (`+++ /dev/null`) are skipped.
 
+## Hook-less agents
+
+Agents without a local hook surface (or where you cannot install one) get two fallbacks
+in the core — no config file required:
+
+- **`quipu capture --git`** — diff the working tree against the last commit and append one
+  `gitdiff | git | <path>` line per changed Markdown file to `activity.log`. Silent on
+  success (0 bytes on stdout). Run it manually before `quipu remember`.
+- **`quipu context --bridge`** — write the recent-session context into a dedicated
+  `<!-- quipu:context:start -->` / `<!-- quipu:context:end -->` block in `AGENTS.md`; the
+  static `<!-- quipu:start -->` block (created by `init`) is left untouched. The agent
+  reads `AGENTS.md` to see its memory.
+
+`capture --git` has honest limits (no `Read` events, stateless re-runs) — see
+[Honest limits](#honest-limits).
+
 ## Status
 
-FAZ 1-4 complete: the seven-command CLI (doctor, init, capture, index, search,
-context, remember), three-OS CI, five-folder vault taxonomy, the Claude Code
-adapter (`adapters/claude-code.json` — hooks only, no installer), multi-schema
-capture (agent-agnostic, dispatch by payload shape), and the Codex adapter
-(`adapters/codex/hooks.json` — config only, no installer). OpenCode, Cursor, and
-Windsurf adapters are postponed (2026-08-20). See [docs/PLAN.md](docs/PLAN.md).
+FAZ 1-5 complete: the seven-command CLI (doctor, init, capture, index, search, context,
+remember), three-OS CI, five-folder vault taxonomy, the Claude Code adapter
+(`adapters/claude-code.json` — hooks only, no installer), multi-schema capture
+(agent-agnostic, dispatch by payload shape), the Codex adapter
+(`adapters/codex/hooks.json` — config only, no installer), and hook-less fallbacks
+(`capture --git` + `context --bridge`). OpenCode, Cursor, and Windsurf adapters are
+postponed (2026-08-20). See [docs/PLAN.md](docs/PLAN.md).
 
 ## Honest limits
 
 - **Folding is lossy**: `açık` and `acık` collapse together — a deliberate trade-off.
 - **"Semantic" ≠ cosine similarity**: model judgment, better on meaning but weaker on exhaustive recall.
 - **Index context limit**: comfortable up to a few thousand notes; beyond that, two-stage narrow-then-read.
+- **`capture --git` is stateless**: it diffs the tree, so it cannot see `Read` events
+  (content unchanged), and two runs without a commit append the same files twice — commit
+  (or `quipu remember --git`) before re-running. Deletions are captured; the index later
+  `drop`s them.
 
 ## License
 

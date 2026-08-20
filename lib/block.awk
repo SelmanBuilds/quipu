@@ -10,8 +10,8 @@
 #   * every other line passes through verbatim (user content is preserved).
 
 BEGIN {
-  start = "<!-- quipu:start -->"
-  end   = "<!-- quipu:end -->"
+  if (start == "") start = "<!-- quipu:start -->"
+  if (end   == "") end   = "<!-- quipu:end -->"
   body  = ""
   while ((getline line < "-") > 0) {
     if (body == "") body = line
