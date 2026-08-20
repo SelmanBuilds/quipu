@@ -139,9 +139,246 @@ if command -v shellcheck >/dev/null 2>&1; then
     not_ok "shellcheck POSIX clean"
     shellcheck -s sh "$ROOT/tests/run.sh" || true
   fi
+  t
+  if shellcheck -s sh "$ROOT/quipu" >/dev/null 2>&1; then
+    ok "shellcheck POSIX clean (quipu)"
+  else
+    not_ok "shellcheck POSIX clean (quipu)"
+    shellcheck -s sh "$ROOT/quipu" || true
+  fi
 else
   t; skip "shellcheck POSIX clean" "shellcheck not installed (CI installs it)"
+  t; skip "shellcheck POSIX clean (quipu)" "shellcheck not installed (CI installs it)"
 fi
+
+# ---- cli skeleton ----
+
+t; VERSION=$(sh "$ROOT/quipu" --version)
+assert_eq "quipu --version prints quipu 0.1.0" 'quipu 0.1.0' "$VERSION"
+
+mkdir -p "$TMP/empty"
+t; (cd "$TMP/empty" && "$ROOT/quipu" doctor) >"$TMP/empty.out" 2>&1; RC=$?
+assert_eq "doctor in empty dir exits 0" '0' "$RC"
+t
+if grep -q 'quipu doctor' "$TMP/empty.out"; then
+  ok "doctor output mentions quipu doctor"
+else
+  not_ok "doctor output mentions quipu doctor"
+fi
+
+mkdir -p "$TMP/vault/.quipu"
+: > "$TMP/vault/.quipu/config"
+t; (cd "$TMP/vault" && "$ROOT/quipu" doctor) >"$TMP/vault.out" 2>&1; RC=$?
+assert_eq "doctor with vault exits 0" '0' "$RC"
+
+t; (cd "$TMP/empty" && QUIPU_LANG=zz "$ROOT/quipu" doctor) >"$TMP/zz.out" 2>&1; RC=$?
+assert_eq "doctor with QUIPU_LANG=zz exits 0" '0' "$RC"
+
+
+# ---- capture (PLAN FAZ 1) ----
+
+mkvault() { mkdir -p "$TMP/$1/.quipu"; : > "$TMP/$1/.quipu/config"; }
+log_line() { awk 'END{i=index($0," | "); print substr($0,i+3)}' "$1/.quipu/activity.log"; }
+
+mkvault vcap
+
+t; QUIPU_VAULT="$TMP/vcap" sh "$ROOT/quipu" capture < "$FIX/posttooluse.json"
+assert_eq "capture: posttooluse appends one line" 'PostToolUse | Read | C:\Users\alice\projects\demo\taskbar_overflow.png' "$(log_line "$TMP/vcap")"
+
+t; printf '%s\n' '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_response":{"file_path":"TUZAK.md"},"tool_input":{"file_path":"dogru.md"}}' | QUIPU_VAULT="$TMP/vcap" sh "$ROOT/quipu" capture
+assert_eq "capture: scoped path beats tool_response trap" 'PostToolUse | Read | dogru.md' "$(log_line "$TMP/vcap")"
+
+# 448 KB payload (big.json pattern) plus a trap file_path past the 64 KB bound.
+printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"big/target.md"},"tool_response":"base64:' > "$TMP/bigcap.json"
+awk 'BEGIN{for(i=0;i<7000;i++) printf "0000000000000000000000000000000000000000000000000000000000000000"}' >> "$TMP/bigcap.json"
+printf '%s' '","trap":{"file_path":"C:\Users\x\trap.md"}}' >> "$TMP/bigcap.json"
+t; START=$(date +%s)
+QUIPU_VAULT="$TMP/vcap" sh "$ROOT/quipu" capture < "$TMP/bigcap.json"
+END=$(date +%s)
+assert_eq "capture: 448 KB payload returns first scoped path" 'PostToolUse | Read | big/target.md' "$(log_line "$TMP/vcap")"
+t; assert_eq "capture: 448 KB payload bounded time" 'yes' "$([ $((END - START)) -lt 30 ] && printf yes || printf no)"
+
+mkvault vcapctl
+t; printf '%s\n' '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"a\nb\tc\rd"}}' | QUIPU_VAULT="$TMP/vcapctl" sh "$ROOT/quipu" capture
+assert_eq "capture: control bytes in path stay on one line" '1' "$(awk 'END{print NR}' "$TMP/vcapctl/.quipu/activity.log")"
+t; assert_eq "capture: control bytes stripped from path" 'PostToolUse | Read | abcd' "$(log_line "$TMP/vcapctl")"
+
+t; QUIPU_VAULT="$TMP/vcap" sh "$ROOT/quipu" capture --event PostToolUse --tool Edit --path 500-Knowledge/not.md
+assert_eq "capture: flag mode appends line" 'PostToolUse | Edit | 500-Knowledge/not.md' "$(log_line "$TMP/vcap")"
+
+t
+# literal $HOME in the single-quoted JSON is the test payload (test data, not expansion).
+# shellcheck disable=SC2016
+printf '%s\n' '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"C:\\Users\\x$HOME\\not.md"}}' | QUIPU_VAULT="$TMP/vcap" sh "$ROOT/quipu" capture
+# literal $HOME in the expected value is part of the same test.
+# shellcheck disable=SC2016
+assert_eq "capture: dollar in path preserved literally" 'PostToolUse | Read | C:\Users\x$HOME\not.md' "$(log_line "$TMP/vcap")"
+
+mkvault vcaprot
+t; LONGPATH=$(awk 'BEGIN{for(i=0;i<200;i++) printf "x"}')
+QUIPU_VAULT="$TMP/vcaprot" QUIPU_LOG_MAX=100 sh "$ROOT/quipu" capture --event PostToolUse --tool Edit --path "$LONGPATH"
+QUIPU_VAULT="$TMP/vcaprot" QUIPU_LOG_MAX=100 sh "$ROOT/quipu" capture --event PostToolUse --tool Edit --path two.md
+assert_eq "capture: rotation creates activity.log.1" 'yes' "$([ -f "$TMP/vcaprot/.quipu/activity.log.1" ] && printf yes || printf no)"
+t; assert_eq "capture: rotated log keeps one line" '1' "$(awk 'END{print NR}' "$TMP/vcaprot/.quipu/activity.log")"
+t; assert_eq "capture: rotated log has latest entry" 'PostToolUse | Edit | two.md' "$(log_line "$TMP/vcaprot")"
+# ---- init + context ----
+
+t; QUIPU_VAULT="$TMP/vinit" sh "$ROOT/quipu" init --lang tr
+for _f in config index.tsv activity.log; do
+  t; assert_eq "init: creates .quipu/$_f" 'yes' "$([ -f "$TMP/vinit/.quipu/$_f" ] && printf yes || printf no)"
+done
+t; assert_eq "init: config records lang=tr" 'yes' "$(grep -q '^lang=tr$' "$TMP/vinit/.quipu/config" && printf yes || printf no)"
+t; (cd "$TMP/vinit" && "$ROOT/quipu" doctor) >"$TMP/vinit-doctor.out" 2>&1; RC=$?
+assert_eq "init: doctor exits 0 in the vault" '0' "$RC"
+
+# Second init must not duplicate the bridge block nor disturb user text.
+printf '# My notes\nkeep this line\n' >> "$TMP/vinit/AGENTS.md"
+t; QUIPU_VAULT="$TMP/vinit" sh "$ROOT/quipu" init
+assert_eq "init: second run preserves user text" 'yes' "$(grep -q '^keep this line$' "$TMP/vinit/AGENTS.md" && printf yes || printf no)"
+t; CNT=$(grep -c 'quipu:start' "$TMP/vinit/AGENTS.md")
+assert_eq "init: second run does not duplicate bridge block" '1' "$CNT"
+t;
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Read | C:\Users\alice\demo\taskbar.png' >> "$TMP/vinit/.quipu/activity.log"
+
+# context --json round-trips back to the plain output.
+printf '2026-08-20T10:00 | PostToolUse | Read | not.md\n' >> "$TMP/vinit/.quipu/activity.log"
+t; PLAIN=$(QUIPU_VAULT="$TMP/vinit" sh "$ROOT/quipu" context)
+JSON=$(QUIPU_VAULT="$TMP/vinit" sh "$ROOT/quipu" context --json SessionStart)
+DECODED=$(printf '%s' "$JSON" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+assert_eq "context: --json round-trips to plain output" "$PLAIN" "$DECODED"
+
+# Empty vault: context exits 0 without crashing.
+mkdir -p "$TMP/vempty/.quipu"
+: > "$TMP/vempty/.quipu/config"
+t; (cd "$TMP/vempty" && "$ROOT/quipu" context) >"$TMP/vempty.out" 2>&1; RC=$?
+assert_eq "context: empty vault exits 0" '0' "$RC"
+
+# init without an AGENTS.md creates it with the bridge heading.
+t; QUIPU_VAULT="$TMP/vagents" sh "$ROOT/quipu" init
+assert_eq "init: creates AGENTS.md when absent" 'yes' "$([ -f "$TMP/vagents/AGENTS.md" ] && printf yes || printf no)"
+t; assert_eq "init: AGENTS.md contains bridge heading" 'yes' "$(grep -q '^## quipu$' "$TMP/vagents/AGENTS.md" && printf yes || printf no)"
+
+# ---- index ----
+
+mk_index_vault() { # dir
+  mkdir -p "$TMP/$1/.quipu"
+  cat > "$TMP/$1/.quipu/config" <<'EOF'
+fold=tr
+lang=en
+EOF
+  cat > "$TMP/$1/fm.md" <<'EOF'
+---
+title: Frontmatter Başlık
+tags: alpha beta
+---
+# Frontmatter Başlık
+Frontmatter body.
+EOF
+  cat > "$TMP/$1/heading.md" <<'EOF'
+# Başlık
+Heading body.
+EOF
+  cat > "$TMP/$1/turkce.md" <<'EOF'
+İstanbul çalışma üzerine.
+EOF
+}
+
+idx_nums() { # summary-file -> "N R S D"
+  awk '{ gsub(/[^0-9]/," "); s=""; for (i=1;i<=NF;i++) if ($i!="") s=s (s==""?"":" ") $i; print s }' "$1"
+}
+
+mk_index_vault idx1
+
+t; (cd "$TMP/idx1" && "$ROOT/quipu" index) >"$TMP/idx1.out" 2>&1; RC=$?
+assert_eq "index: first run exits 0" '0' "$RC"
+t; assert_eq "index: first run writes 3 rows" '3' "$(awk 'END{print NR}' "$TMP/idx1/.quipu/index.tsv")"
+t; assert_eq "index: every row has 5 columns" 'yes' "$(awk -F'\t' '{if (NF != 5) bad++} END{print (bad ? "no" : "yes")}' "$TMP/idx1/.quipu/index.tsv")"
+t; assert_eq "index: first run counts" '3 0 3 0' "$(idx_nums "$TMP/idx1.out")"
+
+sleep 1
+touch "$TMP/idx1/heading.md"
+t; (cd "$TMP/idx1" && "$ROOT/quipu" index) >"$TMP/idx1.out" 2>&1
+assert_eq "index: touch one file reuses 2, stale 1" '3 2 1 0' "$(idx_nums "$TMP/idx1.out")"
+
+rm "$TMP/idx1/fm.md"
+t; (cd "$TMP/idx1" && "$ROOT/quipu" index) >"$TMP/idx1.out" 2>&1
+assert_eq "index: delete one file leaves 2 rows" '2' "$(awk 'END{print NR}' "$TMP/idx1/.quipu/index.tsv")"
+t; assert_eq "index: delete one file drops 1" '2 2 0 1' "$(idx_nums "$TMP/idx1.out")"
+
+t; assert_eq "index: folded field contains calisma" 'yes' "$(awk -F'\t' '$1=="turkce.md" {print (index($5,"calisma")>0) ? "yes" : "no"}' "$TMP/idx1/.quipu/index.tsv")"
+t; assert_eq "index: folded field drops raw çalışma" 'no' "$(awk -F'\t' '$1=="turkce.md" {print (index($5,"çalışma")>0) ? "yes" : "no"}' "$TMP/idx1/.quipu/index.tsv")"
+
+mk_index_vault idxfull
+t; (cd "$TMP/idxfull" && "$ROOT/quipu" index) >/dev/null 2>&1
+(cd "$TMP/idxfull" && "$ROOT/quipu" index --full) >"$TMP/idxfull.out" 2>&1
+assert_eq "index: --full regenerates all rows" '3 0 3 0' "$(idx_nums "$TMP/idxfull.out")"
+
+mkdir -p "$TMP/idxemoji/.quipu"
+: > "$TMP/idxemoji/.quipu/config"
+mkdir -p "$TMP/idxemoji/🔮 notlar"
+cat > "$TMP/idxemoji/🔮 notlar/d.md" <<'EOF'
+# Not
+emoji folder.
+EOF
+t; (cd "$TMP/idxemoji" && "$ROOT/quipu" index) >"$TMP/idxemoji.out" 2>&1; RC=$?
+assert_eq "index: emoji folder doc indexed (exits 0)" '0' "$RC"
+t; assert_eq "index: emoji folder path preserved" '🔮 notlar/d.md' "$(awk -F'\t' 'NR==1 {print $1}' "$TMP/idxemoji/.quipu/index.tsv")"
+
+mk_index_vault idxlang
+t; (cd "$TMP/idxlang" && QUIPU_LANG=en "$ROOT/quipu" index) >"$TMP/idxlang.out" 2>&1
+# idx_summary is the controlled i18n template (not user data); args are integers.
+# shellcheck disable=SC2059
+EXPECT=$(printf "$(awk -F= -v k=idx_summary '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt")" 3 0 3 0)
+assert_eq "index: summary uses i18n idx_summary template" "$EXPECT" "$(cat "$TMP/idxlang.out")"
+
+mkdir -p "$TMP/idxempty/.quipu"
+: > "$TMP/idxempty/.quipu/config"
+t; (cd "$TMP/idxempty" && "$ROOT/quipu" index) >"$TMP/idxempty.out" 2>&1; RC=$?
+assert_eq "index: empty vault exits 0" '0' "$RC"
+t; assert_eq "index: empty vault counts" '0 0 0 0' "$(idx_nums "$TMP/idxempty.out")"
+
+# ---- search ----
+
+mk_search_vault() { # dir
+  mkdir -p "$TMP/$1/.quipu"
+  cat > "$TMP/$1/.quipu/config" <<'EOF'
+fold=tr
+lang=en
+EOF
+  printf '# notlar\n\nİstanbul üzerine notlar. Işık deneyleri burada.\n' > "$TMP/$1/istanbul-a.md"
+  printf 'İstanbul ve ışık bu dosyada anlatılıyor.\n' > "$TMP/$1/istanbul-b.md"
+  printf 'Çalışma notları ve günlük plan.\n' > "$TMP/$1/calisma-a.md"
+  printf 'Bu dosyada çalışma düzeni var.\n' > "$TMP/$1/calisma-b.md"
+  printf '# alpha\nalpha appears in the body too.\n' > "$TMP/$1/title-doc.md"
+  printf '# beta\nalpha appears in the body as well.\n' > "$TMP/$1/body-doc.md"
+}
+
+mk_search_vault searchv
+QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" index >/dev/null 2>&1
+
+# §4.2 live check. A raw `grep -i` over these docs returns 1/2, 1/2, 0/2 for
+# İstanbul / IŞIK / çalışma (the Turkish folding gap); folded search is 2/2.
+t; assert_eq "search İstanbul returns 2/2" '2' "$(QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" search İstanbul | awk 'END{print NR}')"
+t; assert_eq "search IŞIK returns 2/2" '2' "$(QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" search IŞIK | awk 'END{print NR}')"
+t; assert_eq "search çalışma returns 2/2" '2' "$(QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" search çalışma | awk 'END{print NR}')"
+
+# A title match ranks ahead of a body-only match.
+t; FIRST=$(QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" search alpha | awk 'NR==1{print $2}')
+assert_eq "search ranks title match first" 'title-doc.md' "$FIRST"
+
+# --limit and --paths shapes.
+t; assert_eq "search --limit 1 returns one line" '1' "$(QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" search çalışma --limit 1 | awk 'END{print NR}')"
+t; PATHS=$(QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" search çalışma --paths | sort)
+assert_eq "search --paths prints only the two paths" 'calisma-a.md
+calisma-b.md' "$PATHS"
+t; assert_eq "search --paths lines have no TAB" '' "$(printf '%s\n' "$PATHS" | awk 'index($0, sprintf("%c", 9)) != 0 { print NR }')"
+
+# Empty query is a usage error; an unmatched query is empty but successful.
+t; QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" search >"$TMP/search-empty.out" 2>&1; RC=$?
+assert_eq "search empty query exits 2" '2' "$RC"
+t; OUT=$(QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" search xyzzy); RC=$?
+assert_eq "search no-match exits 0" '0' "$RC"
+t; assert_eq "search no-match empty output" '' "$OUT"
 
 # ---- summary ----
 
