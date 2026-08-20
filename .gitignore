@@ -3,4 +3,4 @@ activity.log
 capture-*.jsonl
 .claude/faz0/
 .claude/
-docs/c-users-*-*.md
+docs/
