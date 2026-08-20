@@ -324,6 +324,18 @@ bir repo açmak mid-session kod çalıştırabilirdi.
 **Etkisi:** adaptör testleri (FAZ 3+) oturum yeniden başlatması gerektirir. Kurulum
 betiği kullanıcıya bunu açıkça söylemeli.
 
+### 4.16 `awk -v` kaçış dizilerini İŞLER — ham veri stdin/dosyadan geçer (FAZ 1 Adım 3)
+
+`awk -v X="$değer"` değerdeki `\n`, `\t`, `\uXXXX` benzeri dizileri çözer. Canlı yakalandı:
+`context --json` ilk sürümü bağlamı `-v JE_CTX=...` ile geçiriyordu; Windows yolu
+`C:\Users\alice\...` → `C:Users\u0007lice...\t...` olarak **BOZULDU** (`\U`→U, `\a`→BEL,
+`\t`→tab). Test 52 başlangıçta yakalayamadı çünkü test verisinde ters-slash yoktu.
+
+**KURAL: `-v` yalnız sabit/kontrollü değerler için (mod adı, anahtar, katlanmış sorgu).**
+Kullanıcı verisi stdin ya da dosya üzerinden geçer — awk her ikisini bayt bayt okur,
+kaçış çözmez. Düzeltme: `lib/emit_hookctx.awk` bağlamı stdin'den okur; test 52 gerçek
+Windows yoluyla güçlendirildi.
+
 ---
 
 ## 5. Ajan entegrasyon yüzeyleri
@@ -421,29 +433,35 @@ eklemek, macOS/BSD kırılmalarını geniş yüzeyde aynı anda keşfetmek demek
 #### Adım 3 — CLI yüzeyi
 
 ```
-quipu init      # vault iskeleti + git init + AGENTS.md
-quipu index     # .quipu/index.tsv üret/güncelle (artımlı)
-quipu search    # hibrit: katlanmış grep → aday listesi
-quipu capture   # activity.log'a satır ekle (sınırlı önek okur)
-quipu remember  # Last-Session/Threads güncelleme talimatı üret
 quipu doctor    # ortam teşhisi: hangi araç var, hangi ajan kurulu, ne bozuk
+quipu capture   # activity.log'a satır ekle (sınırlı önek okur)
+quipu index     # .quipu/index.tsv üret/güncelle (artımlı)
+quipu search    # katlanmış sözcüksel + BM25 (indeks küçükse ajan anlamla seçer)
+quipu init      # .quipu/ + AGENTS.md köprü bloğu (vault taksonomisi FAZ 2'de)
+quipu context   # son oturum bağlamı; --json EVENT → §4.5 zarfı
 ```
 
 `quipu doctor`, FAZ 0'ın envanterini (§4.10) kalıcı bir komuta çevirir.
 
+Sıralama gerekçesi: `doctor` önce (teşhis), sonra `yakala → indeksle → ara` zinciri
+(katman sırası), `init`/`context` sonda (vault varsayar). `context --json`, FAZ 3
+adaptörünün yalnızca bir yapılandırma dosyası olabilmesinin şartıdır (§4.5 zarfını
+üretir). `remember` (Last-Session/Threads talimatı) FAZ 3'e (SessionEnd) ertelendi.
+
 **Yasak desenler** (CI veya kod incelemesinde zorlanır):
 `declare -A` · `${var,,}` · `[[ ]]` · `=~` (POSIX değil) · `conhost`/`cmd` sarmalayıcısı
 (§4.13) · hook `command`'ında doğrudan `.sh` (§4.14) · kaçış dizisine dayanan kod (§4.11)
+· ham kullanıcı verisini `awk -v` ile geçirmek (§4.16)
 
 #### Depo yapısı
 
 ```
 quipu/
 ├── quipu                      # tek dosya POSIX sh CLI
-├── lib/{jsonfield,jsonemit,index}.awk
+├── lib/{jsonfield,jsonemit,index,capture,search,block,emit_hookctx}.awk
 ├── fold/{tr,latin,default}.sed
 ├── i18n/{tr,en}.txt
-├── tests/run.sh + tests/fixtures/
+├── tests/run.sh + tests/fixtures/ + tests/drivers/
 ├── docs/PLAN.md               # bu dosya buraya taşınır
 ├── docs/FAZ0-BULGULAR.md
 ├── .github/workflows/ci.yml
@@ -493,12 +511,14 @@ POSIX uyumu) tekrarlanmaz.
 | ~~`PostToolUse` şeması doğrulanmadı~~ | ✅ **KAPANDI** — FAZ 0'da gerçek payload'la doğrulandı (§4.12) |
 | `jsonfield` kapsamsız arama | `index(s,key)` tüm string'i tarar; `tool_response` içindeki literal `"file_path"` yanlış eşleşebilir. → `jsonfield_from` + sınırlı önek (§4.8) |
 | Büyük payload | Ölçülen örnek 458 KB (base64 `tool_response`). `capture` asla tüm stdin'i belleğe almamalı (§4.12) |
-| CRLF satır sonu | `*.sh text eol=lf` yoksa Windows'ta commit sırasında CRLF girer ve `#!/bin/sh` bozulur |
+| CRLF satır sonu | `*.sh text eol=lf` yoksa Windows'ta commit sırasında CRLF girer ve `#!/bin/sh` bozulur. → ✅ **KAPANDI** (Adım 2: `*.sh eol=lf`; Adım 3: uzantısız `quipu` için `/quipu text eol=lf`) |
 | Hook config sıcak yüklenmez | Adaptör testleri oturum yeniden başlatması gerektirir; kurulum betiği bunu söylemeli (§4.15) |
 | İndeks bağlam sınırı | Semantik katman indeksi ajanın okumasına dayanır. Birkaç bin nota kadar rahat; ötesinde iki aşamalı daralt-sonra-oku gerekir. |
+| Başlık/etiket boost'u | Katlanmış terim ham başlıkla karşılaştırıldığı için ×2/×1.5 ağırlık yalnız ASCII başlıklarda ateşler. Geri çağırma etkilenmez (katlanmış alan başlığı zaten içerir), yalnız sıralama. |
+| Negatif IDF | Tek dokümanlı vault'ta BM25 IDF negatife düşer; `search.awk` bunu `matched` bayrağıyla telafi eder (dokümanın kendi duman testi bunu gerektiriyor). |
 | "Semantik" ≠ kosinüs benzerliği | Model yargısı. Anlamda daha iyi, kapsayıcı geri çağırmada daha zayıf. Farklı kalite profili — dürüstçe belgelenmeli. |
 | Katlama kayıplı | `açık` ve `acık` çakışır. Bilinçli tercih, belgelenmeli. |
-| `activity.log` şişmesi | `PostToolUse` çok sık tetiklenir; rotasyon şart. |
+| `activity.log` şişmesi | `PostToolUse` çok sık tetiklenir; rotasyon şart. → ✅ **KAPANDI** (Adım 3: 256 KB eşik, tek nesil `.1` rotasyonu — `QUIPU_LOG_MAX` ile ayarlanır) |
 | macOS/BSD test edilmedi | Bölüm 4 bulguları Windows+Git Bash'te ölçüldü. BSD `sed`/`awk`/`tr` farklılıkları CI'da doğrulanmalı. |
 | Emoji klasörler + OneDrive | Kurulumda kontrol et. `--plain` alternatifi sun. |
 
@@ -531,12 +551,13 @@ vermediğini test et.
 ## 9. Durum ve sonraki adım
 
 **Tamamlanan:** FAZ 0 ✅ (2026-08-19) — 4 maddeden 3'ü doğrulandı, 1'i (PreCompact) FAZ 3'e
-ertelendi. FAZ 1 Adım 1 ✅ — `lib/{jsonfield,jsonemit}.awk`, `fold/{tr,latin,default}.sed`,
-`tests/run.sh` + fixture'lar; Windows + Git Bash'te 29/30 geçti (shellcheck yerelde yok,
-CI kuruyor).
+ertelendi. FAZ 1 Adım 1 ✅ — ilkeller + `tests/run.sh`. FAZ 1 Adım 2 ✅ — üç OS'ta yeşil CI
+matrisi (`b63fb5f`; macOS runner = BSD `sed`/`awk`/`tr`/`stat` sınavı). FAZ 1 Adım 3 ✅
+(2026-08-20) — altı komutlu CLI yüzeyi: `doctor`, `capture`, `index`, `search`, `init`,
+`context`; yerelde 80/80, 2 SKIP (shellcheck yerelde yok, CI kuruyor).
 
-**Sıradaki:** FAZ 1 Adım 2 — ilk commit → CI matrisinin üç OS'ta yeşile alınması
-(macOS runner = BSD `sed`/`awk`/`tr`/`stat` sınavı). Sonra Adım 3: CLI yüzeyi.
+**Sıradaki:** Adım 3'ün commit + push'u → shellcheck ve üç OS CI'sının Adım 3 kodunda
+yeşile alınması. Sonra FAZ 2: vault taksonomisi + kimlik (`companion.md`, `Threads.md`).
 
 ### Çalışmaya başlarken
 1. Bu dosyayı ve `FAZ0-BULGULAR.md`'yi oku (ölçüm ayrıntıları orada).
