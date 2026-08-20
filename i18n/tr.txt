@@ -1,0 +1,50 @@
+# core
+usage_head=Kullanım: quipu KOMUT [seçenekler]
+usage_doctor=  doctor    ortamı denetle: araçlar, lehçeler, vault, ajanlar
+usage_capture=  capture   activity.log'a araç kullanım olayı ekle (stdin okur)
+usage_index=  index     .quipu/index.tsv üret/güncelle (artımlı)
+usage_search=  search    indeks üzerinde katlanmış sözcüksel + BM25 arama
+usage_init=  init      .quipu/ ve AGENTS.md köprü bloğunu kur
+usage_context=  context   ajan için oturum hafızası bağlamını bas
+err_unknown=bilinmeyen komut:
+err_no_vault=vault bulunamadı (.quipu/ yok); çalıştır: quipu init
+err_missing_arg=zorunlu argüman eksik
+# doctor
+doc_head=quipu doctor - ortam denetimi
+doc_ok=ok
+doc_warn=uyarı
+doc_fail=hata
+doc_sec_tools=araçlar
+doc_sec_dialects=lehçeler
+doc_sec_files=kurulum dosyaları
+doc_sec_vault=vault
+doc_sec_agents=ajan yüzeyleri
+doc_sec_warn=uyarılar
+doc_stat_gnu=GNU stat (-c %Y)
+doc_stat_bsd=BSD stat (-f %m)
+doc_stat_none=stat yok - mtime() 0 döner
+doc_awk_bs=awk kod noktası ters-slash (plan 4.11)
+doc_vault_ok=vault mevcut
+doc_vault_missing=vault yok (quipu init)
+doc_index_stale=index.tsv yok ya da bayat (quipu index)
+doc_log_size=activity.log boyutu
+doc_crlf=kendi kaynağında CR baytı var (eol=lf ayarla)
+doc_onedrive=yol OneDrive içeriyor (emoji klasör riski, plan 4.9)
+doc_locale=locale UTF-8 değil (katlama riski, plan 4.3)
+doc_summary=özet: %d ok, %d uyarı, %d hata
+# index
+idx_summary=# indekslendi %d (yeniden %d, bayat %d, düştü %d)
+# search
+err_empty_query=boş sorgu
+err_no_index=index.tsv yok; çalıştır: quipu index
+# init
+init_ok=quipu vault kuruldu: %s
+init_idem=vault zaten kurulu; değişiklik yapılmadı
+init_git=git deposu kuruldu
+init_lang=dil ayarlandı: %s
+init_agents=AGENTS.md köprü bloğu hazır
+# context
+ctx_activity=son etkinlik
+ctx_threads=konular
+ctx_index=indeks istatistiği
+ctx_empty=henüz hafıza yok
