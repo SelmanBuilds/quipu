@@ -5,7 +5,7 @@
 > Buradaki tüm teknik bulgular **ölçülmüş ve doğrulanmıştır** — tahmin değildir.
 > Kanıtlar "Doğrulanmış Bulgular" bölümünde, yeniden üretme komutlarıyla birlikte.
 >
-> **Tarih:** 2026-08-19 · **Durum:** FAZ 1 Adım 1 tamam (ilkeller + testler), Adım 2 (CI) sürüyor
+> **Tarih:** 2026-08-20 · **Durum:** FAZ 1 tamam — altı komutlu CLI, üç OS CI yeşil (PR #1). FAZ 2 sırada.
 > **İsim notu:** `quipu` seçildi. Değiştirmek istersen tüm dosyada tek find/replace yeter.
 
 ---
@@ -554,10 +554,10 @@ vermediğini test et.
 ertelendi. FAZ 1 Adım 1 ✅ — ilkeller + `tests/run.sh`. FAZ 1 Adım 2 ✅ — üç OS'ta yeşil CI
 matrisi (`b63fb5f`; macOS runner = BSD `sed`/`awk`/`tr`/`stat` sınavı). FAZ 1 Adım 3 ✅
 (2026-08-20) — altı komutlu CLI yüzeyi: `doctor`, `capture`, `index`, `search`, `init`,
-`context`; yerelde 80/80, 2 SKIP (shellcheck yerelde yok, CI kuruyor).
+`context`; `faz1-adim3` dalı → PR #1 (`f7c55aa`→`c2a8e92`), üç OS CI'sı yeşil; yerelde
+83/83, shellcheck 0.10.0 sessiz.
 
-**Sıradaki:** Adım 3'ün commit + push'u → shellcheck ve üç OS CI'sının Adım 3 kodunda
-yeşile alınması. Sonra FAZ 2: vault taksonomisi + kimlik (`companion.md`, `Threads.md`).
+**Sıradaki:** FAZ 2: vault taksonomisi + kimlik (`companion.md`, `Threads.md`).
 
 ### Çalışmaya başlarken
 1. Bu dosyayı ve `FAZ0-BULGULAR.md`'yi oku (ölçüm ayrıntıları orada).
