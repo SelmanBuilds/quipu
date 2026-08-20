@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "shell": "bash",
+                     "command": "QUIPU_HOOK=1 quipu remember && QUIPU_HOOK=1 quipu context --json SessionStart",
+                     "timeout": 10 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "shell": "bash",
+                     "command": "QUIPU_HOOK=1 quipu context --json UserPromptSubmit",
+                     "timeout": 10 } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Edit|Write|NotebookEdit|Read",
+        "hooks": [ { "type": "command", "shell": "bash",
+                     "command": "QUIPU_HOOK=1 quipu capture",
+                     "timeout": 10, "async": true } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "shell": "bash",
+                     "command": "QUIPU_HOOK=1 quipu remember",
+                     "timeout": 30 } ] }
+    ]
+  }
+}

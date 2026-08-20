@@ -37,6 +37,8 @@ doc_layout=layout
 doc_layout_missing=config has no layout= value (run: quipu init)
 doc_companion_missing=companion.md missing (run: quipu init)
 doc_onedrive_vault=vault path contains OneDrive (emoji folder risk, PLAN 4.9)
+doc_hooks_installed=installed
+doc_hooks_missing=not installed
 # index
 idx_summary=# indexed %d (reused %d, stale %d, dropped %d)
 # search
@@ -58,6 +60,16 @@ ctx_activity=recent activity
 ctx_threads=threads
 ctx_index=index stats
 ctx_empty=no memory yet
+ctx_truncated=… (truncated)
+ctx_precompact=Context may be compacted: write your memory now — update Threads.md and append today's session summary to the %s folder.
+# remember
+usage_remember=  remember  write mechanical digest from activity.log (append-only)
+remember_ok=wrote: %s
+remember_empty=no new lines to remember
+remember_git=git commit done
+digest_range=Range: %s → %s (%d events)
+digest_tools=Tools: %s
+digest_files=Touched files (top %d):
 # bridge
 bridge_run=Run: quipu context
 bridge_layout=Layout:

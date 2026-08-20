@@ -508,6 +508,255 @@ t; OUT=$(QUIPU_VAULT="$TMP/searchv" sh "$ROOT/quipu" search xyzzy); RC=$?
 assert_eq "search no-match exits 0" '0' "$RC"
 t; assert_eq "search no-match empty output" '' "$OUT"
 
+# ---- context output bound (C-16/C-17) ----
+
+mkvault vctxb
+printf 'lang=en\n' >> "$TMP/vctxb/.quipu/config"
+: > "$TMP/vctxb/.quipu/index.tsv"
+: > "$TMP/vctxb/.quipu/activity.log"
+awk 'BEGIN { for (i=1; i<=200; i++) printf "thread line %03d padding padding padding\n", i }' > "$TMP/vctxb/Threads.md"
+
+t; QUIPU_CTX_MAX=1000 QUIPU_VAULT="$TMP/vctxb" sh "$ROOT/quipu" context > "$TMP/vctxb.out"
+SIZE=$(wc -c < "$TMP/vctxb.out" | tr -d ' ')
+assert_eq "context bound: body within QUIPU_CTX_MAX+10" 'yes' "$([ "$SIZE" -le 1010 ] && printf yes || printf no)"
+t; assert_eq "context bound: activity header present" 'yes' "$(grep -q '^recent activity$' "$TMP/vctxb.out" && printf yes || printf no)"
+t; assert_eq "context bound: index header present" 'yes' "$(grep -q '^index stats$' "$TMP/vctxb.out" && printf yes || printf no)"
+t; assert_eq "context bound: last threads line cut" 'no' "$(grep -q 'thread line 200' "$TMP/vctxb.out" && printf yes || printf no)"
+
+# T-42: multibyte lines must survive the cut as valid UTF-8 (C-17).
+mkvault vctxu
+printf 'lang=en\n' >> "$TMP/vctxu/.quipu/config"
+: > "$TMP/vctxu/.quipu/index.tsv"
+: > "$TMP/vctxu/.quipu/activity.log"
+awk 'BEGIN { for (i=1; i<=60; i++) printf "İstanbul ğüşiöç 🔮 日本語 — line %d\n", i }' > "$TMP/vctxu/Threads.md"
+
+t; QUIPU_CTX_MAX=800 QUIPU_VAULT="$TMP/vctxu" sh "$ROOT/quipu" context > "$TMP/vctxu.out"
+if LC_ALL=C awk '
+  BEGIN { for (i = 0; i < 256; i++) ORD[sprintf("%c", i)] = i; need = 0 }
+  {
+    for (i = 1; i <= length($0); i++) {
+      b = ORD[substr($0, i, 1)]
+      if (need > 0) {
+        if (b < 128 || b > 191) { bad = 1; exit 1 }
+        need--
+      } else if (b < 128) {
+        continue
+      } else if (b >= 194 && b <= 223) {
+        need = 1
+      } else if (b >= 224 && b <= 239) {
+        need = 2
+      } else if (b >= 240 && b <= 244) {
+        need = 3
+      } else {
+        bad = 1; exit 1
+      }
+    }
+  }
+  END { if (need > 0) exit 1 }
+' "$TMP/vctxu.out"; then
+  VUTF=yes
+else
+  VUTF=no
+fi
+assert_eq "context bound: truncated multibyte output is valid UTF-8" 'yes' "$VUTF"
+
+# T-43: the truncation marker appears exactly once.
+CTRUNC=$(awk -F= -v k=ctx_truncated '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt")
+t; assert_eq "context bound: truncated marker appears exactly once" '1' "$(grep -F -c "$CTRUNC" "$TMP/vctxb.out")"
+
+# T-44: truncated --json stays valid and round-trips to the plain output.
+t; CTXBJSON=$(QUIPU_CTX_MAX=1000 QUIPU_VAULT="$TMP/vctxb" sh "$ROOT/quipu" context --json SessionStart)
+CTXBDEC=$(printf '%s' "$CTXBJSON" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+CTXBPLAIN=$(QUIPU_CTX_MAX=1000 QUIPU_VAULT="$TMP/vctxb" sh "$ROOT/quipu" context)
+assert_eq "context bound: truncated --json round-trips to plain" "$CTXBPLAIN" "$CTXBDEC"
+
+# ---- context nudge (C-19/C-20) ----
+
+mkvault vnudge
+QUIPU_VAULT="$TMP/vnudge" sh "$ROOT/quipu" init --plain >/dev/null 2>&1
+printf 'lang=en\n' >> "$TMP/vnudge/.quipu/config"
+for _n in 1 2 3; do
+  printf '2026-08-20T10:0%s | PostToolUse | Read | nudge%s.md\n' "$_n" "$_n" >> "$TMP/vnudge/.quipu/activity.log"
+done
+
+CPREC=$(awk -F= -v k=ctx_precompact '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt")
+# shellcheck disable=SC2059
+CPREC_EXPECT=$(printf "$CPREC" '700-Sessions')
+
+t; NJ=$(QUIPU_NUDGE_AFTER=2 QUIPU_VAULT="$TMP/vnudge" sh "$ROOT/quipu" context --json UserPromptSubmit)
+ND=$(printf '%s' "$NJ" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+assert_eq "nudge: UserPromptSubmit adds ctx_precompact" 'yes' "$(printf '%s\n' "$ND" | grep -F -q "$CPREC_EXPECT" && printf yes || printf no)"
+t; assert_eq "nudge: .quipu/nudged created" 'yes' "$([ -f "$TMP/vnudge/.quipu/nudged" ] && printf yes || printf no)"
+t; assert_eq "nudge: .quipu/nudged equals last log line" '2026-08-20T10:03 | PostToolUse | Read | nudge3.md' "$(cat "$TMP/vnudge/.quipu/nudged")"
+
+t; NJ2=$(QUIPU_NUDGE_AFTER=2 QUIPU_VAULT="$TMP/vnudge" sh "$ROOT/quipu" context --json UserPromptSubmit)
+ND2=$(printf '%s' "$NJ2" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+assert_eq "nudge: not repeated without new lines" 'no' "$(printf '%s\n' "$ND2" | grep -F -q "$CPREC_EXPECT" && printf yes || printf no)"
+
+for _n in 4 5 6; do
+  printf '2026-08-20T10:0%s | PostToolUse | Read | nudge%s.md\n' "$_n" "$_n" >> "$TMP/vnudge/.quipu/activity.log"
+done
+t; NJ3=$(QUIPU_NUDGE_AFTER=2 QUIPU_VAULT="$TMP/vnudge" sh "$ROOT/quipu" context --json UserPromptSubmit)
+ND3=$(printf '%s' "$NJ3" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+assert_eq "nudge: re-triggers after threshold re-crossed" 'yes' "$(printf '%s\n' "$ND3" | grep -F -q "$CPREC_EXPECT" && printf yes || printf no)"
+
+mkvault vnudge9
+QUIPU_VAULT="$TMP/vnudge9" sh "$ROOT/quipu" init --plain >/dev/null 2>&1
+printf 'lang=en\n' >> "$TMP/vnudge9/.quipu/config"
+printf '2026-08-20T10:00 | PostToolUse | Read | nudge9.md\n' >> "$TMP/vnudge9/.quipu/activity.log"
+t; NJ9=$(QUIPU_NUDGE_AFTER=999 QUIPU_VAULT="$TMP/vnudge9" sh "$ROOT/quipu" context --json UserPromptSubmit)
+ND9=$(printf '%s' "$NJ9" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+assert_eq "nudge: threshold never reached -> no ctx_precompact" 'no' "$(printf '%s\n' "$ND9" | grep -F -q "$CPREC_EXPECT" && printf yes || printf no)"
+t; assert_eq "nudge: .quipu/nudged not created" 'no' "$([ -f "$TMP/vnudge9/.quipu/nudged" ] && printf yes || printf no)"
+
+# ---- remember (FAZ 3) ----
+
+i18n() { awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt"; }
+mkrem() { QUIPU_VAULT="$TMP/$1" sh "$ROOT/quipu" init --plain >/dev/null 2>&1; }
+rem() { _r_v=$1; shift; QUIPU_VAULT="$TMP/$_r_v" QUIPU_LANG=en sh "$ROOT/quipu" remember "$@"; }
+
+D=$(date +%Y-%m-%d)
+REM_EMPTY=$(i18n remember_empty)
+REM_GIT=$(i18n remember_git)
+
+mkrem vr30
+t; OUT=$(rem vr30); RC=$?
+assert_eq "remember: empty log leaves nothing behind" 'yes' \
+  "$([ "$RC" -eq 0 ] && printf '%s\n' "$OUT" | grep -qF "$REM_EMPTY" && [ ! -f "$TMP/vr30/700-Sessions/$D.md" ] && [ ! -f "$TMP/vr30/Last-Session.md" ] && [ ! -f "$TMP/vr30/.quipu/remembered" ] && printf yes || printf no)"
+
+mkrem vr31
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' '2026-08-20T10:01 | PostToolUse | Read | 300-Projects/p.md' '2026-08-20T10:02 | PostToolUse | Write | 100-Inbox/i.md' >> "$TMP/vr31/.quipu/activity.log"
+t; OUT=$(rem vr31); RC=$?
+assert_eq "remember: writes session file and watermark" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ -s "$TMP/vr31/700-Sessions/$D.md" ] && grep -qF '## ' "$TMP/vr31/700-Sessions/$D.md" && grep -qF '500-Knowledge/not.md' "$TMP/vr31/700-Sessions/$D.md" && [ "$(cat "$TMP/vr31/.quipu/remembered")" = '2026-08-20T10:02 | PostToolUse | Write | 100-Inbox/i.md' ] && printf yes || printf no)"
+
+printf '%s\n' '2026-08-20T10:03 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr31/.quipu/activity.log"
+t; OUT=$(rem vr31); RC=$?
+assert_eq "remember: appends second section same day" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ "$(grep -c '## ' "$TMP/vr31/700-Sessions/$D.md")" = 2 ] && grep -qF '2026-08-20T10:00' "$TMP/vr31/700-Sessions/$D.md" && printf yes || printf no)"
+
+t; BEFORE=$(wc -l < "$TMP/vr31/700-Sessions/$D.md" | tr -d ' ')
+OUT=$(rem vr31); RC=$?
+assert_eq "remember: no new lines is a no-op" 'yes' \
+  "$([ "$RC" -eq 0 ] && printf '%s\n' "$OUT" | grep -qF "$REM_EMPTY" && [ "$(wc -l < "$TMP/vr31/700-Sessions/$D.md" | tr -d ' ')" = "$BEFORE" ] && printf yes || printf no)"
+
+printf '%s\n' '2026-08-20T11:00 | PostToolUse | Edit | 500-Knowledge/new.md' > "$TMP/vr31/.quipu/activity.log"
+printf '%s\n' '2026-08-20T11:01 | PostToolUse | Read | 500-Knowledge/new.md' >> "$TMP/vr31/.quipu/activity.log"
+t; BEFORE=$(grep -c '## ' "$TMP/vr31/700-Sessions/$D.md")
+OUT=$(rem vr31); RC=$?
+assert_eq "remember: rotation reprocesses whole log" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ "$(grep -c '## ' "$TMP/vr31/700-Sessions/$D.md")" = "$((BEFORE + 1))" ] && printf yes || printf no)"
+
+mkrem vr35
+printf 'user marker L1\n' > "$TMP/vr35/Last-Session.md"
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr35/.quipu/activity.log"
+rem vr35 >/dev/null 2>&1
+printf '%s\n' '2026-08-20T10:01 | PostToolUse | Read | 500-Knowledge/other.md' >> "$TMP/vr35/.quipu/activity.log"
+rem vr35 >/dev/null 2>&1
+t; assert_eq "remember: Last-Session keeps user line and one block" 'yes' \
+  "$(grep -qF 'user marker L1' "$TMP/vr35/Last-Session.md" && [ "$(grep -c 'quipu:start' "$TMP/vr35/Last-Session.md")" = 1 ] && printf yes || printf no)"
+
+mkrem vr36
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr36/.quipu/activity.log"
+t; OUT=$(rem vr36 --dry-run); RC=$?
+assert_eq "remember: dry-run prints but writes nothing" 'yes' \
+  "$([ "$RC" -eq 0 ] && printf '%s\n' "$OUT" | grep -qF '## ' && printf '%s\n' "$OUT" | grep -qF 'Range: ' && [ ! -f "$TMP/vr36/700-Sessions/$D.md" ] && [ ! -f "$TMP/vr36/Last-Session.md" ] && [ ! -f "$TMP/vr36/.quipu/remembered" ] && printf yes || printf no)"
+
+mkrem vr37
+printf '%s\n' \
+  '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' \
+  '2026-08-20T10:01 | PostToolUse | Edit | 500-Knowledge/not.md' \
+  '2026-08-20T10:02 | PostToolUse | Read | 500-Knowledge/not.md' \
+  '2026-08-20T10:03 | PostToolUse | Read | 500-Knowledge/other.md' \
+  >> "$TMP/vr37/.quipu/activity.log"
+t; OUT=$(rem vr37); RC=$?
+F37A=$(printf '  - %2d  %s' 3 '500-Knowledge/not.md')
+F37B=$(printf '  - %2d  %s' 1 '500-Knowledge/other.md')
+assert_eq "remember: digest counts tools and files" 'yes' \
+  "$([ "$RC" -eq 0 ] && grep -qF 'Edit 2' "$TMP/vr37/700-Sessions/$D.md" && grep -qF 'Read 2' "$TMP/vr37/700-Sessions/$D.md" && grep -qF "$F37A" "$TMP/vr37/700-Sessions/$D.md" && grep -qF "$F37B" "$TMP/vr37/700-Sessions/$D.md" && printf yes || printf no)"
+
+mkrem vr38
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/a.md' >> "$TMP/vr38/.quipu/activity.log"
+printf '%s\n' '2026-08-20T10:01 | PostToolUse | Read | 500-Knowledge/b.md' >> "$TMP/vr38/.quipu/activity.log"
+t; OUT=$(rem vr38 --limit 1); RC=$?
+assert_eq "remember: --limit 1 lists one file" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ "$(grep -c '  - ' "$TMP/vr38/700-Sessions/$D.md")" = 1 ] && printf yes || printf no)"
+
+mkrem vr39
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr39/.quipu/activity.log"
+t; OUT=$(rem vr39 --git); RC=$?
+assert_eq "remember: --git outside a repo is a no-op" 'yes' \
+  "$([ "$RC" -eq 0 ] && printf '%s\n' "$OUT" | grep -qF 'wrote:' && [ "$(printf '%s\n' "$OUT" | grep -cF "$REM_GIT")" = 0 ] && printf yes || printf no)"
+
+mkrem vr40
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr40/.quipu/activity.log"
+git init -q "$TMP/vr40"
+t; OUT=$(GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t QUIPU_VAULT="$TMP/vr40" QUIPU_LANG=en sh "$ROOT/quipu" remember --git); RC=$?
+GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t QUIPU_VAULT="$TMP/vr40" QUIPU_LANG=en sh "$ROOT/quipu" remember --git >/dev/null 2>&1; RC2=$?
+assert_eq "remember: --git commits once and skips empty" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ "$(git -C "$TMP/vr40" log --oneline | wc -l | tr -d ' ')" = 1 ] && printf '%s\n' "$OUT" | grep -qF "$REM_GIT" && [ "$RC2" -eq 0 ] && [ "$(git -C "$TMP/vr40" log --oneline | wc -l | tr -d ' ')" = 1 ] && printf yes || printf no)"
+
+
+# ---- FAZ 3 E-4: claude-code adapter (data) + QUIPU_HOOK silent success ----
+
+# T-46: adapter is pure data — no Windows shell cruft, no .sh in commands.
+t; BAD=$(grep -E 'conhost|cmd\.exe' "$ROOT/adapters/claude-code.json")
+assert_eq "adapter: no conhost/cmd.exe" '' "$BAD"
+t; BAD=$(grep -oE '"command": "[^"]*"' "$ROOT/adapters/claude-code.json" | grep -E '\.sh')
+assert_eq "adapter: no .sh in any command" '' "$BAD"
+
+# T-47: every command is prefixed QUIPU_HOOK=1 quipu, every shell is bash,
+# and "async": true appears exactly once (the PostToolUse hook).
+t; CMDS=$(grep -cE '"command": "' "$ROOT/adapters/claude-code.json")
+PREFIXED=$(grep -cE '"command": "QUIPU_HOOK=1 quipu ' "$ROOT/adapters/claude-code.json")
+assert_eq "adapter: every command starts with QUIPU_HOOK=1 quipu" "$CMDS" "$PREFIXED"
+t; SHELLS=$(grep -cE '"shell": "' "$ROOT/adapters/claude-code.json")
+BASHES=$(grep -cE '"shell": "bash"' "$ROOT/adapters/claude-code.json")
+assert_eq "adapter: every shell is bash" "$SHELLS" "$BASHES"
+t; ASYNC=$(grep -c '"async": true' "$ROOT/adapters/claude-code.json")
+assert_eq "adapter: exactly one async hook" '1' "$ASYNC"
+
+# T-48: QUIPU_HOOK turns _q_die into a silent success — exit 0 instead of the
+# error code, while the message still reaches stderr. A vault-less cwd (no
+# QUIPU_VAULT override, no .quipu/config ancestor) triggers _q_die err_no_vault.
+mkdir -p "$TMP/t48"
+t; (cd "$TMP/t48" && QUIPU_HOOK=1 sh "$ROOT/quipu" remember) >/dev/null 2>"$TMP/t48a.err"; RC=$?
+assert_eq "hook: remember no vault exits 0 with stderr" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ -s "$TMP/t48a.err" ] && printf yes || printf no)"
+t; (cd "$TMP/t48" && sh "$ROOT/quipu" remember) >/dev/null 2>"$TMP/t48b.err"; RC=$?
+assert_eq "no-hook: remember no vault exits 1 with stderr" 'yes' \
+  "$([ "$RC" -eq 1 ] && [ -s "$TMP/t48b.err" ] && printf yes || printf no)"
+t; printf '%s\n' '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"x.md"}}' | (cd "$TMP/t48" && QUIPU_HOOK=1 sh "$ROOT/quipu" capture) >/dev/null 2>"$TMP/t48c.err"; RC=$?
+assert_eq "hook: capture no vault exits 0 with stderr" 'yes' \
+  "$([ "$RC" -eq 0 ] && [ -s "$TMP/t48c.err" ] && printf yes || printf no)"
+t; printf '%s\n' '{"hook_event_name":"PostToolUse","tool_name":"Read","tool_input":{"file_path":"x.md"}}' | (cd "$TMP/t48" && sh "$ROOT/quipu" capture) >/dev/null 2>"$TMP/t48d.err"; RC=$?
+assert_eq "no-hook: capture no vault exits 1 with stderr" 'yes' \
+  "$([ "$RC" -eq 1 ] && [ -s "$TMP/t48d.err" ] && printf yes || printf no)"
+
+# T-49: doctor claude hooks line (C-28): settings with quipu -> installed,
+# settings without quipu -> not installed. Both runs exit 0.
+mkdir -p "$TMP/fakeh/.claude"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"quipu context --json SessionStart"}]}]}}\n' > "$TMP/fakeh/.claude/settings.json"
+t; (cd "$TMP" && HOME="$TMP/fakeh" QUIPU_LANG=en sh "$ROOT/quipu" doctor) >"$TMP/fakeh1.out" 2>&1; RC=$?
+assert_eq "doctor: hooks installed when settings has quipu" 'yes' \
+  "$([ "$RC" -eq 0 ] && awk -F"$TAB" '$2=="claude hooks" && $3=="installed" {f=1} END {exit !f}' "$TMP/fakeh1.out" && printf yes || printf no)"
+printf '{}\n' > "$TMP/fakeh/.claude/settings.json"
+t; (cd "$TMP" && HOME="$TMP/fakeh" QUIPU_LANG=en sh "$ROOT/quipu" doctor) >"$TMP/fakeh2.out" 2>&1; RC=$?
+assert_eq "doctor: hooks not installed when settings lacks quipu" 'yes' \
+  "$([ "$RC" -eq 0 ] && awk -F"$TAB" '$2=="claude hooks" && $3=="not installed" {f=1} END {exit !f}' "$TMP/fakeh2.out" && printf yes || printf no)"
+
+# ---- capture: Windows-form path normalization (FAZ 3, live layer finding) ----
+
+if command -v cygpath >/dev/null 2>&1; then
+  mkvault vcapwin
+  WINTMP=$(cygpath -w "$TMP/vcapwin")
+  # The backslashes below are DATA inside single quotes (PLAN 4.11).
+  t; QUIPU_VAULT="$TMP/vcapwin" sh "$ROOT/quipu" capture --event PostToolUse --tool Edit --path "$WINTMP\\500-Knowledge\\not.md"
+  assert_eq "capture: Windows path becomes vault-relative" 'PostToolUse | Edit | 500-Knowledge/not.md' "$(log_line "$TMP/vcapwin")"
+else
+  t; skip "capture: Windows path becomes vault-relative" "cygpath not installed"
+fi
+
 # ---- summary ----
 
 printf '# pass %d, fail %d, skip %d\n' "$PASS" "$FAIL" "$SKIP"
