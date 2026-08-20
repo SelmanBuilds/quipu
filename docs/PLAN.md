@@ -5,7 +5,7 @@
 > Buradaki tüm teknik bulgular **ölçülmüş ve doğrulanmıştır** — tahmin değildir.
 > Kanıtlar "Doğrulanmış Bulgular" bölümünde, yeniden üretme komutlarıyla birlikte.
 >
-> **Tarih:** 2026-08-20 · **Durum:** FAZ 3 tamam — Claude Code adaptörü (referans uygulama) + `quipu remember`; üç OS CI PR'a kaldı. FAZ 4 sırada.
+> **Tarih:** 2026-08-20 · **Durum:** FAZ 3 tamam — Claude Code adaptörü (referans uygulama) + `quipu remember`; üç OS CI yeşil (PR #3, 39d79cd). FAZ 4 sırada.
 > **İsim notu:** `quipu` seçildi. Değiştirmek istersen tüm dosyada tek find/replace yeter.
 
 ---
@@ -531,7 +531,7 @@ toplayıcı `lib/digest.awk`, `context` çıktı sınırı (`QUIPU_CTX_MAX`, var
 `UserPromptSubmit` bayatlık nudge'ı (`QUIPU_NUDGE_AFTER`, varsayılan 50, `.quipu/nudged`) —
 **PreCompact dalı ölçümle düştü: çıktı modele ulaşmıyor (§4.18)** —, `adapters/claude-code.json`,
 `doctor` hook kontrolü, `QUIPU_HOOK` sessiz-başarı bayrağı, README "Claude Code" bölümü;
-testler 117 → 154. Üç OS CI notu PR'a kaldı (**PR pending**).
+testler 117 → 155 geçti + 2 skip (157 iddia). Üç OS CI yeşil (PR #3, 39d79cd).
 
 ### FAZ 4 — Diğer adaptörler
 Codex → OpenCode → Cursor/Windsurf. Her biri **sadece bir yapılandırma dosyası** olmalı;
@@ -621,8 +621,8 @@ sindirimi (filigran `.quipu/remembered`, append-only `<sessions>/YYYY-MM-DD.md`,
 `context` çıktı sınırı (`QUIPU_CTX_MAX`) + `UserPromptSubmit` bayatlık nudge'ı
 (`QUIPU_NUDGE_AFTER`) — PreCompact çıktısının modele ulaşmadığı ölçüldü (§4.18) —,
 `adapters/claude-code.json`, `doctor` hook kontrolü, `QUIPU_HOOK` sessiz-başarı bayrağı,
-README "Claude Code" bölümü; FAZ3-SPEC sözleşmesi C-1..C-36; yerelde 154/154, shellcheck sessiz;
-üç OS CI notu PR'a kaldı (**PR pending**).
+README "Claude Code" bölümü; FAZ3-SPEC sözleşmesi C-1..C-36; yerelde 155 geçti + 2 skip
+(shellcheck PATH dışı; shellcheck.exe sessiz); üç OS CI yeşil (PR #3, 39d79cd).
 
 **Sıradaki:** FAZ 4: Codex → OpenCode → Cursor/Windsurf adaptörleri — her biri yalnızca bir yapılandırma dosyası.
 

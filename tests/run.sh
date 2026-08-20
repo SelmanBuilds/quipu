@@ -518,7 +518,7 @@ awk 'BEGIN { for (i=1; i<=200; i++) printf "thread line %03d padding padding pad
 
 t; QUIPU_CTX_MAX=1000 QUIPU_VAULT="$TMP/vctxb" sh "$ROOT/quipu" context > "$TMP/vctxb.out"
 SIZE=$(wc -c < "$TMP/vctxb.out" | tr -d ' ')
-assert_eq "context bound: body within QUIPU_CTX_MAX+10" 'yes' "$([ "$SIZE" -le 1010 ] && printf yes || printf no)"
+assert_eq "context bound: body within QUIPU_CTX_MAX" 'yes' "$([ "$SIZE" -le 1000 ] && printf yes || printf no)"
 t; assert_eq "context bound: activity header present" 'yes' "$(grep -q '^recent activity$' "$TMP/vctxb.out" && printf yes || printf no)"
 t; assert_eq "context bound: index header present" 'yes' "$(grep -q '^index stats$' "$TMP/vctxb.out" && printf yes || printf no)"
 t; assert_eq "context bound: last threads line cut" 'no' "$(grep -q 'thread line 200' "$TMP/vctxb.out" && printf yes || printf no)"
@@ -696,6 +696,11 @@ GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=
 assert_eq "remember: --git commits once and skips empty" 'yes' \
   "$([ "$RC" -eq 0 ] && [ "$(git -C "$TMP/vr40" log --oneline | wc -l | tr -d ' ')" = 1 ] && printf '%s\n' "$OUT" | grep -qF "$REM_GIT" && [ "$RC2" -eq 0 ] && [ "$(git -C "$TMP/vr40" log --oneline | wc -l | tr -d ' ')" = 1 ] && printf yes || printf no)"
 
+mkrem vr50
+printf 'not a valid log line\n' > "$TMP/vr50/.quipu/activity.log"
+t; OUT=$(rem vr50); RC=$?
+assert_eq "remember: malformed log is a no-op" 'yes' \
+  "$([ "$RC" -eq 0 ] && printf '%s\n' "$OUT" | grep -qF "$REM_EMPTY" && [ ! -f "$TMP/vr50/700-Sessions/$D.md" ] && [ ! -f "$TMP/vr50/Last-Session.md" ] && [ ! -f "$TMP/vr50/.quipu/remembered" ] && printf yes || printf no)"
 
 # ---- FAZ 3 E-4: claude-code adapter (data) + QUIPU_HOOK silent success ----
 
