@@ -3,12 +3,13 @@ usage_head=Usage: quipu COMMAND [options]
 usage_doctor=  doctor    check environment: tools, dialects, vault, agents
 usage_capture=  capture   append a tool-use event to activity.log (reads stdin)
 usage_index=  index     build/update .quipu/index.tsv (incremental)
-usage_search=  search    folded lexical + BM25 search over the index
+usage_search=  search    folded lexical + BM25 search over the index (--brief: 120-byte snippet)
 usage_init=  init      create .quipu/ and the AGENTS.md bridge block
 usage_context=  context   print session memory context for the agent
 err_unknown=unknown command:
 err_no_vault=no vault found (.quipu/ missing); run: quipu init
 err_missing_arg=missing required argument
+err_unknown_flag=unknown flag: %s
 # doctor
 doc_head=quipu doctor - environment check
 doc_ok=ok
@@ -80,10 +81,18 @@ bridge_updated=AGENTS.md context block updated
 err_conflict=options are mutually exclusive
 # layout
 layout_inbox=capture point for quick, unprocessed notes
+layout_dump=unsorted dump inside the inbox
+layout_command=dashboard and daily entry point
 layout_projects=active work, one subfolder per project
 layout_knowledge=long-lived notes and references
+layout_arsenal=tools, scripts and reusable snippets
 layout_sessions=per-session memory (FAZ 3 SessionEnd)
 layout_companion=companion persona and identity
+layout_archive=finished or frozen material
+layout_templates=note templates; copy them, do not edit in place
 # threads
 threads_seed_title=# Threads
 threads_seed_note=Ongoing threads in this vault. Append new lines; quipu never rewrites this file.
+# dashboard
+dashboard_seed_title=# Dashboard
+dashboard_seed_note=Entry point for this vault. Append links and today's focus; quipu never rewrites this file.

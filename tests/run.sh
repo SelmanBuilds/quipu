@@ -304,6 +304,9 @@ layout_names() { # emoji|plain -> one folder name per line
 comp_name() { # emoji|plain -> companion folder name
   awk -F"$TAB" '$1=="companion"{print $2;exit}' "$ROOT/layout/$1.txt"
 }
+cmd_name() { # emoji|plain -> command-center folder name
+  awk -F"$TAB" '$1=="command"{print $2;exit}' "$ROOT/layout/$1.txt"
+}
 
 mkvault vlay
 QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" init
@@ -311,12 +314,16 @@ QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" init
 t; FAILED=$(layout_names emoji | while IFS= read -r _n; do
   if [ -d "$TMP/vlay/$_n" ] && [ -f "$TMP/vlay/$_n/.gitkeep" ]; then :; else printf '%s\n' "$_n"; fi
 done)
-assert_eq "init: five emoji folders each with .gitkeep" '' "$FAILED"
+assert_eq "init: every emoji layout folder has .gitkeep" '' "$FAILED"
 
 mkvault vplain
 QUIPU_VAULT="$TMP/vplain" sh "$ROOT/quipu" init --plain
+t; MISSD=$(layout_names plain | while IFS= read -r _n; do
+  [ -d "$TMP/vplain/$_n" ] || printf '%s\n' "$_n"
+done)
+assert_eq "init --plain: every plain layout folder exists" '' "$MISSD"
 t; GOT=$(cd "$TMP/vplain" && find . -maxdepth 1 -mindepth 1 -type d ! -name .quipu ! -name .git | cut -c3- | sort)
-assert_eq "init --plain: folder names match layout/plain.txt" "$(layout_names plain | sort)" "$GOT"
+assert_eq "init --plain: no unexpected top-level folders" "$(layout_names plain | awk -F/ '{print $1}' | sort -u)" "$GOT"
 t; BAD=$( (cd "$TMP/vplain" && find . -maxdepth 1 -mindepth 1 -type d ! -name .quipu ! -name .git) | LC_ALL=C grep '[^ -~]' || true)
 assert_eq "init --plain: folder names contain no non-ASCII bytes" '' "$BAD"
 
@@ -356,7 +363,7 @@ t; assert_eq "init: CLAUDE.md block not duplicated" '1' "$(grep -c 'quipu:start'
 t; MISS=$(layout_names emoji | while IFS= read -r _n; do
   awk -v s="$_n" 'index($0, s) {found=1} END {exit !found}' "$TMP/vlay/AGENTS.md" || printf '%s\n' "$_n"
 done)
-assert_eq "init: AGENTS.md block lists all five folders" '' "$MISS"
+assert_eq "init: AGENTS.md block lists every layout folder" '' "$MISS"
 
 t; assert_eq "init: Threads.md seeded" 'yes' "$([ -f "$TMP/vlay/Threads.md" ] && printf yes || printf no)"
 TITLE=$(awk -F= -v k=threads_seed_title '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt")
@@ -367,6 +374,14 @@ t; assert_eq "context: prints threads section and seed" 'yes' "$(printf '%s\n' "
 printf 'user thread marker\n' >> "$TMP/vlay/Threads.md"
 QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" init >/dev/null 2>&1
 t; assert_eq "init: user Threads.md lines preserved" 'yes' "$(grep -q '^user thread marker$' "$TMP/vlay/Threads.md" && printf yes || printf no)"
+
+DTITLE=$(awk -F= -v k=dashboard_seed_title '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt")
+DNOTE=$(awk -F= -v k=dashboard_seed_note '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt")
+t; assert_eq "init: Dashboard.md seeded from i18n title and note" 'yes' "$([ -f "$TMP/vlay/$(cmd_name emoji)/Dashboard.md" ] && grep -qF "$DTITLE" "$TMP/vlay/$(cmd_name emoji)/Dashboard.md" && grep -qF "$DNOTE" "$TMP/vlay/$(cmd_name emoji)/Dashboard.md" && printf yes || printf no)"
+
+printf 'user dashboard marker\n' >> "$TMP/vlay/$(cmd_name emoji)/Dashboard.md"
+QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" init >/dev/null 2>&1
+t; assert_eq "init: user Dashboard.md lines preserved" 'yes' "$(grep -q '^user dashboard marker$' "$TMP/vlay/$(cmd_name emoji)/Dashboard.md" && printf yes || printf no)"
 
 QUIPU_VAULT="$TMP/vlay" sh "$ROOT/quipu" index >/dev/null 2>&1
 t; assert_eq "index: companion.md has a row" 'yes' "$(awk -F"$TAB" 'index($1, "companion.md") {print "yes"; exit}' "$TMP/vlay/.quipu/index.tsv")"
@@ -646,10 +661,10 @@ assert_eq "remember: empty log leaves nothing behind" 'yes' \
   "$([ "$RC" -eq 0 ] && printf '%s\n' "$OUT" | grep -qF "$REM_EMPTY" && [ ! -f "$TMP/vr30/700-Sessions/$D.md" ] && [ ! -f "$TMP/vr30/Last-Session.md" ] && [ ! -f "$TMP/vr30/.quipu/remembered" ] && printf yes || printf no)"
 
 mkrem vr31
-printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' '2026-08-20T10:01 | PostToolUse | Read | 300-Projects/p.md' '2026-08-20T10:02 | PostToolUse | Write | 100-Inbox/i.md' >> "$TMP/vr31/.quipu/activity.log"
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' '2026-08-20T10:01 | PostToolUse | Read | 300-Projects/p.md' '2026-08-20T10:02 | PostToolUse | Write | 000-Inbox/i.md' >> "$TMP/vr31/.quipu/activity.log"
 t; OUT=$(rem vr31); RC=$?
 assert_eq "remember: writes session file and watermark" 'yes' \
-  "$([ "$RC" -eq 0 ] && [ -s "$TMP/vr31/700-Sessions/$D.md" ] && grep -qF '## ' "$TMP/vr31/700-Sessions/$D.md" && grep -qF '500-Knowledge/not.md' "$TMP/vr31/700-Sessions/$D.md" && [ "$(cat "$TMP/vr31/.quipu/remembered")" = '2026-08-20T10:02 | PostToolUse | Write | 100-Inbox/i.md' ] && printf yes || printf no)"
+  "$([ "$RC" -eq 0 ] && [ -s "$TMP/vr31/700-Sessions/$D.md" ] && grep -qF '## ' "$TMP/vr31/700-Sessions/$D.md" && grep -qF '500-Knowledge/not.md' "$TMP/vr31/700-Sessions/$D.md" && [ "$(cat "$TMP/vr31/.quipu/remembered")" = '2026-08-20T10:02 | PostToolUse | Write | 000-Inbox/i.md' ] && printf yes || printf no)"
 
 printf '%s\n' '2026-08-20T10:03 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr31/.quipu/activity.log"
 t; OUT=$(rem vr31); RC=$?
@@ -937,6 +952,241 @@ t; assert_eq "block.awk: -v override replaces default markers" 'yes' \
 printf 'default body\n' | awk -f "$LIB/block.awk" "$TMP/t71.md" > "$TMP/t71.out"
 t; assert_eq "block.awk: default markers exact text" 'yes' \
   "$(grep -q '^<!-- quipu:start -->$' "$TMP/t71.out" && grep -q '^<!-- quipu:end -->$' "$TMP/t71.out" && grep -q '^default body$' "$TMP/t71.out" && printf yes || printf no)"
+
+# ---- FAZ 6: e2e chain scenarios (T-72..T-73) ----
+
+# T-72 (I-2): the whole chain in one vault — init -> flag-mode capture -> index
+# -> search. Each step's exit code is asserted on its own (SPEC 3, T-72), so a
+# regression is pinned to one link instead of surfacing only at the last hop.
+# `init` writes layout=emoji + lang=tr but no fold= line, so the folding profile
+# is nailed down explicitly; QUIPU_LANG=en keeps every message ASCII-stable.
+t; QUIPU_VAULT="$TMP/vchain" QUIPU_LANG=en sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1; RC=$?
+assert_eq "chain: init exits 0" '0' "$RC"
+printf 'fold=tr\n' >> "$TMP/vchain/.quipu/config"
+printf '# Notlar\n\nAlpha zincir notu.\n' > "$TMP/vchain/note.md"
+
+# Flag-mode capture needs no JSON fixture (G-4) — the chain stays hermetic.
+t; QUIPU_VAULT="$TMP/vchain" QUIPU_LANG=en sh "$ROOT/quipu" capture --event PostToolUse --tool Write --path note.md; RC=$?
+assert_eq "chain: capture exits 0" '0' "$RC"
+t; assert_eq "chain: capture appends the flag-mode line" 'PostToolUse | Write | note.md' "$(log_line "$TMP/vchain")"
+
+t; QUIPU_VAULT="$TMP/vchain" QUIPU_LANG=en sh "$ROOT/quipu" index >/dev/null 2>&1; RC=$?
+assert_eq "chain: index exits 0" '0' "$RC"
+
+t; CHAIN_HIT=$(QUIPU_VAULT="$TMP/vchain" QUIPU_LANG=en sh "$ROOT/quipu" search alpha | awk -F"$TAB" 'NR==1{print $2}')
+assert_eq "chain: search returns the captured note" 'note.md' "$CHAIN_HIT"
+
+# T-73 (I-3): the Turkish form of the same chain. The note says "İstanbul ışık";
+# indexing folds it, so the lowercase query hits, and the dotted-capital query
+# must return the byte-identical result set — index folding == query folding all
+# the way along the chain (SPEC 4.2 in chain form).
+QUIPU_VAULT="$TMP/vchaintr" QUIPU_LANG=en sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1
+printf 'fold=tr\n' >> "$TMP/vchaintr/.quipu/config"
+printf '# Işık\n\nİstanbul ışık deneyleri burada.\n' > "$TMP/vchaintr/istanbul.md"
+QUIPU_VAULT="$TMP/vchaintr" QUIPU_LANG=en sh "$ROOT/quipu" capture --event PostToolUse --tool Write --path istanbul.md >/dev/null 2>&1
+QUIPU_VAULT="$TMP/vchaintr" QUIPU_LANG=en sh "$ROOT/quipu" index >/dev/null 2>&1
+
+t; CHAIN_TR_LOWER=$(QUIPU_VAULT="$TMP/vchaintr" QUIPU_LANG=en sh "$ROOT/quipu" search istanbul | awk -F"$TAB" '{print $2}')
+assert_eq "chain tr: lowercase query returns the folded note" 'istanbul.md' "$CHAIN_TR_LOWER"
+
+# Dotted capital İ (U+0130): same path list, or the folding broke mid-chain.
+t; CHAIN_TR_UPPER=$(QUIPU_VAULT="$TMP/vchaintr" QUIPU_LANG=en sh "$ROOT/quipu" search İstanbul | awk -F"$TAB" '{print $2}')
+assert_eq "chain tr: dotted-capital query matches lowercase run" "$CHAIN_TR_LOWER" "$CHAIN_TR_UPPER"
+
+# ---- FAZ 6: index summary shape + git chain + doctor (T-74..T-77) ----
+
+# T-74 (I-4): first index run. The exact line is locked against the i18n
+# template under QUIPU_LANG=en, then the same counts are re-read through
+# language-independent field extraction so a translation change cannot mask a
+# counting bug.
+mk_index_vault vidx74
+(cd "$TMP/vidx74" && QUIPU_LANG=en "$ROOT/quipu" index) >"$TMP/vidx74.out" 2>&1
+# idx_summary is the controlled i18n template (not user data); args are integers.
+# shellcheck disable=SC2059
+EXP74=$(printf "$(awk -F= -v k=idx_summary '$1==k{sub(/^[^=]*=/,"");print;exit}' "$ROOT/i18n/en.txt")" 3 0 3 0)
+t; assert_eq "index: first run summary is the exact idx_summary line" "$EXP74" "$(cat "$TMP/vidx74.out")"
+t; assert_eq "index: first run fields are 3 0 3 0" '3 0 3 0' "$(idx_nums "$TMP/vidx74.out")"
+
+# T-75 (I-4): an unchanged second run reuses every row; touching one file makes
+# exactly that row stale and leaves the other two reused.
+(cd "$TMP/vidx74" && QUIPU_LANG=en "$ROOT/quipu" index) >"$TMP/vidx74.out" 2>&1
+t; assert_eq "index: unchanged second run reuses 3, stale 0" '3 3 0 0' "$(idx_nums "$TMP/vidx74.out")"
+sleep 1
+touch "$TMP/vidx74/heading.md"
+(cd "$TMP/vidx74" && QUIPU_LANG=en "$ROOT/quipu" index) >"$TMP/vidx74.out" 2>&1
+t; assert_eq "index: one touched file leaves stale 1, reused 2" '3 2 1 0' "$(idx_nums "$TMP/vidx74.out")"
+
+# T-76 (I-5): the git chain in one vault — init --git -> commit -> note.md ->
+# capture --git -> index -> search hit -> remember --git (which commits by
+# itself) -> commit leftovers -> capture --git again. The core claim is the last
+# one: the commit consumed the diff, so no second gitdiff line appears (H-9
+# honesty proven end to end). `init` writes no fold= line, so the profile is
+# pinned explicitly. gitdiff lines are counted with awk index() rather than
+# grep, keeping the pattern policy uniform (PLAN 4.3).
+mkdir -p "$TMP/vgitchain"
+QUIPU_VAULT="$TMP/vgitchain" QUIPU_LANG=en sh "$ROOT/quipu" init --git --lang tr >/dev/null 2>&1
+printf 'fold=tr\n' >> "$TMP/vgitchain/.quipu/config"
+git_commit vgitchain init
+printf 'Alpha git zinciri notu.\n' > "$TMP/vgitchain/note.md"
+
+t; QUIPU_VAULT="$TMP/vgitchain" sh "$ROOT/quipu" capture --git
+assert_eq "git chain: first capture --git logs one gitdiff line" '1' \
+  "$(awk 'index($0, "gitdiff") > 0 {c++} END{print c+0}' "$TMP/vgitchain/.quipu/activity.log")"
+
+t; (cd "$TMP/vgitchain" && QUIPU_LANG=en "$ROOT/quipu" index) >"$TMP/vgitchain.idx" 2>&1; RC=$?
+assert_eq "git chain: index after capture exits 0" '0' "$RC"
+
+t; assert_eq "git chain: search alpha returns note.md" 'note.md' \
+  "$(QUIPU_VAULT="$TMP/vgitchain" QUIPU_LANG=en sh "$ROOT/quipu" search alpha | awk 'NR==1{print $2}')"
+
+GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+  QUIPU_VAULT="$TMP/vgitchain" QUIPU_LANG=en sh "$ROOT/quipu" remember --git >/dev/null 2>&1
+# remember --git already committed; this only drains anything it left behind and
+# must not fail the run when the tree is clean.
+git_commit vgitchain after-remember >/dev/null 2>&1 || true
+
+t; QUIPU_VAULT="$TMP/vgitchain" sh "$ROOT/quipu" capture --git
+assert_eq "git chain: capture --git after the commit adds no gitdiff line" '1' \
+  "$(awk 'index($0, "gitdiff") > 0 {c++} END{print c+0}' "$TMP/vgitchain/.quipu/activity.log")"
+
+# T-77 (I-6): doctor over the full chain vault. The summary wording and the ok /
+# warn counts are free to move (claude hooks are not installed here), so only the
+# trailing number — the failure count — is asserted, language-independently.
+t; (cd "$TMP/vgitchain" && QUIPU_LANG=en "$ROOT/quipu" doctor) >"$TMP/vgitchain.doc" 2>&1; RC=$?
+assert_eq "doctor: chain vault exits 0" '0' "$RC"
+t; assert_eq "doctor: chain vault summary reports 0 fail" '0' \
+  "$(awk 'END{ gsub(/[^0-9]/, " "); n = split($0, f, " "); print f[n] }' "$TMP/vgitchain.doc")"
+
+# ---- FAZ 7: DZ-4 unknown flag diagnosis (T-78..T-81) ----
+
+# DZ-4: an unrecognized flag must name itself and exit 2 on every command that
+# parses flags, while the legacy "missing required argument" diagnosis stays
+# byte-identical. err_unknown_flag is the controlled i18n template; the only
+# argument is the flag itself.
+# shellcheck disable=SC2059
+FLAG_MSG=$(printf "$(i18n err_unknown_flag)\n" --bogus)
+
+# T-78: capture.
+mkvault vflag78
+t; QUIPU_VAULT="$TMP/vflag78" QUIPU_LANG=en sh "$ROOT/quipu" capture --bogus \
+  </dev/null >/dev/null 2>"$TMP/vflag78-capture.err"; RC=$?
+assert_eq "capture --bogus exits 2" '2' "$RC"
+t; assert_eq "capture --bogus names the flag" "$FLAG_MSG" "$(cat "$TMP/vflag78-capture.err")"
+
+# T-79: same diagnosis from init / context / remember.
+for _c in init context remember; do
+  t; QUIPU_VAULT="$TMP/vflag78" QUIPU_LANG=en sh "$ROOT/quipu" "$_c" --bogus \
+    </dev/null >/dev/null 2>"$TMP/vflag78-$_c.err"; RC=$?
+  assert_eq "$_c --bogus exits 2" '2' "$RC"
+  t; assert_eq "$_c --bogus names the flag" "$FLAG_MSG" "$(cat "$TMP/vflag78-$_c.err")"
+done
+
+# T-80: search must diagnose the flag instead of swallowing it as a query word.
+# The vault is fully indexed, so nothing but the flag can fail the run.
+mk_search_vault vflag80
+QUIPU_VAULT="$TMP/vflag80" sh "$ROOT/quipu" index >/dev/null 2>&1
+t; QUIPU_VAULT="$TMP/vflag80" QUIPU_LANG=en sh "$ROOT/quipu" search --bogus \
+  >"$TMP/vflag80.out" 2>"$TMP/vflag80.err"; RC=$?
+assert_eq "search --bogus exits 2" '2' "$RC"
+t; assert_eq "search --bogus names the flag" "$FLAG_MSG" "$(cat "$TMP/vflag80.err")"
+t; assert_eq "search --bogus prints no results" '' "$(cat "$TMP/vflag80.out")"
+
+# T-81 regression: `_q_die key code` callers are untouched — a known flag
+# starved of its value still gets the old message, with no flag interpolation.
+t; QUIPU_VAULT="$TMP/vflag78" QUIPU_LANG=en sh "$ROOT/quipu" capture --event \
+  </dev/null >/dev/null 2>"$TMP/vflag78-event.err"; RC=$?
+assert_eq "capture --event without value exits 2" '2' "$RC"
+t; assert_eq "capture --event without value keeps err_missing_arg" \
+  "$(i18n err_missing_arg)" "$(cat "$TMP/vflag78-event.err")"
+t; assert_eq "capture --event without value mentions no flag" 'no' \
+  "$(grep -qE 'unknown|--bogus' "$TMP/vflag78-event.err" && printf yes || printf no)"
+
+# ---- FAZ 7: search --brief (T-82..T-84) ----
+
+# The search fixture plus one document whose folded field is far longer than
+# the 120-byte snippet window, so the cut path is actually exercised.
+mk_search_vault vbrief
+awk 'BEGIN{ s = "alpha"; for (i = 1; i <= 48; i++) s = s " wordnumber" i; print "# longdoc"; print ""; print s }' > "$TMP/vbrief/long-doc.md"
+QUIPU_VAULT="$TMP/vbrief" sh "$ROOT/quipu" index >/dev/null 2>&1
+
+# T-82 (J-5): --brief adds a 5th TAB field, never wider than 120 bytes, and a
+# folded field that already fits is carried through uncut.
+#
+# Byte vs character: gawk counts length()/substr() in CHARACTERS, mawk in
+# BYTES. The claim below is a byte claim, so it only holds while every row
+# matching `alpha` is pure ASCII — which it is: the fixture pins fold=tr, and
+# the three matching documents (title-doc / body-doc / long-doc) are ASCII to
+# begin with (measured: 194 bytes == 194 awk chars for the whole column).
+# Do NOT add a matching document with non-ASCII folded text without switching
+# this assertion to a real byte count.
+BRIEF=$(QUIPU_VAULT="$TMP/vbrief" QUIPU_LANG=en sh "$ROOT/quipu" search alpha --brief)
+t; assert_eq "search --brief: every row has 5 fields" 'yes' "$(printf '%s\n' "$BRIEF" | awk -F"$TAB" '{if (NF != 5) bad++} END{print (bad ? "no" : "yes")}')"
+t; assert_eq "search --brief: snippet is at most 120 bytes" 'yes' "$(printf '%s\n' "$BRIEF" | awk -F"$TAB" '{if (length($5) > 120) bad++} END{print (bad ? "no" : "yes")}')"
+t; SHORT_FULL=$(awk -F"$TAB" '$1 == "body-doc.md" { print $5 }' "$TMP/vbrief/.quipu/index.tsv")
+assert_eq "search --brief: short field is emitted whole" "$SHORT_FULL" "$(printf '%s\n' "$BRIEF" | awk -F"$TAB" '$2 == "body-doc.md" { print $5 }')"
+
+# T-83 (J-5): the long document's snippet stops on a word boundary. Proof: it
+# does not end with a space, and in the full folded field the byte right after
+# the snippet IS a space, so no word was split. The snippet and the full field
+# reach awk as file arguments (never `awk -v`, which would mangle raw data).
+QUIPU_VAULT="$TMP/vbrief" QUIPU_LANG=en sh "$ROOT/quipu" search alpha --brief \
+  | awk -F"$TAB" '$2 == "long-doc.md" { print $5 }' > "$TMP/vbrief-brief.txt"
+awk -F"$TAB" '$1 == "long-doc.md" { print $5 }' "$TMP/vbrief/.quipu/index.tsv" > "$TMP/vbrief-full.txt"
+t; assert_eq "search --brief: snippet has no trailing space" 'yes' "$(awk 'NR == 1 { print (substr($0, length($0), 1) == " " ? "no" : "yes") }' "$TMP/vbrief-brief.txt")"
+t; assert_eq "search --brief: cut lands on a word boundary" 'yes' "$(awk 'FNR == 1 && NR == 1 { b = $0; next } FNR == 1 { print (substr($0, 1, length(b)) == b && substr($0, length(b) + 1, 1) == " " ? "yes" : "no") }' "$TMP/vbrief-brief.txt" "$TMP/vbrief-full.txt")"
+
+# T-84 (J-6): --brief and --paths are mutually exclusive.
+t; QUIPU_VAULT="$TMP/vbrief" QUIPU_LANG=en sh "$ROOT/quipu" search alpha --brief --paths >"$TMP/vbrief-conf.out" 2>"$TMP/vbrief-conf.err"; RC=$?
+assert_eq "search --brief --paths exits 2" '2' "$RC"
+t; assert_eq "search --brief --paths reports the conflict" "$(i18n err_conflict)" "$(cat "$TMP/vbrief-conf.err")"
+
+# ---- FAZ 7: scale, 5000 docs (T-85..T-87) ----
+
+# J-7 turns the "5000 notes" claim into a measurement instead of a sentence in
+# prose, on Linux, macOS and Windows alike. The corpus is generated here by one
+# loop and never committed: ~100 bytes per note, a term every document shares
+# (`ortakterim`) plus a per-file unique term. Note 1 additionally carries a long
+# ASCII word run, so the 120-byte --brief cut is exercised at scale too.
+printf '# info: scale vault: generating 5000 docs\n'
+mkvault vscale
+printf 'fold=tr\nlang=en\n' > "$TMP/vscale/.quipu/config"
+i=1
+while [ "$i" -le 5000 ]; do
+  printf '# not %s\n\nortakterim tekil%s satir govdesi burada duruyor ve kisa kaliyor.\n' "$i" "$i" > "$TMP/vscale/n$i.md"
+  i=$((i + 1))
+done
+awk 'BEGIN{ s = "ortakterim tekil1"; for (i = 1; i <= 48; i++) s = s " wordnumber" i; print "# not 1"; print ""; print s }' > "$TMP/vscale/n1.md"
+
+# T-85 (J-7): a cold index over 5000 documents completes and indexes every one
+# of them. On Windows/msys each stale file costs ~6 process spawns, which is the
+# cost J-7 exists to expose, so the number that matters is the printed one.
+printf '# info: scale vault: indexing 5000 docs (this takes minutes on Windows)\n'
+START=$(date +%s)
+QUIPU_VAULT="$TMP/vscale" QUIPU_LANG=en sh "$ROOT/quipu" index > "$TMP/vscale.out" 2>&1
+END=$(date +%s)
+t; assert_eq "scale: index of a clean 5000-doc vault counts 5000" '5000 0 5000 0' "$(idx_nums "$TMP/vscale.out")"
+t; assert_eq "scale: index.tsv has 5000 rows" '5000' "$(awk 'END{print NR}' "$TMP/vscale/.quipu/index.tsv")"
+printf '# info: index 5000 docs: %s s\n' "$((END - START))"
+# 3600s is a hang/regression ceiling, not a performance claim; the real number is
+# printed above (measured 2150-2367 s for 5000 docs on Windows msys across two runs —
+# ~0.43-0.47 s/doc, dominated by ~6 process spawns per file; Linux and macOS are far faster).
+t; assert_eq "scale: index 5000 docs within bound" 'yes' "$([ $((END - START)) -lt 3600 ] && printf yes || printf no)"
+
+# T-86 (J-7): search over the 5000-row index stays interactive. `ortakterim` is
+# in every document, so --limit 5000 must return all 5000 rows.
+START=$(date +%s)
+QUIPU_VAULT="$TMP/vscale" QUIPU_LANG=en sh "$ROOT/quipu" search ortakterim --limit 5000 > "$TMP/vscale-search.out" 2>&1
+END=$(date +%s)
+t; assert_eq "scale: search returns all 5000 hits" '5000' "$(awk 'END{print NR}' "$TMP/vscale-search.out")"
+printf '# info: search 5000-doc index: %s s\n' "$((END - START))"
+t; assert_eq "scale: search on a 5000-doc index within bound" 'yes' "$([ $((END - START)) -lt 30 ] && printf yes || printf no)"
+
+# T-87 (J-7): the --brief contract (5 TAB fields, snippet capped at 120 bytes)
+# and --limit hold at scale, not just on the six-document fixture.
+QUIPU_VAULT="$TMP/vscale" QUIPU_LANG=en sh "$ROOT/quipu" search ortakterim --limit 50 --brief > "$TMP/vscale-brief.out" 2>&1
+t; assert_eq "scale: --brief rows have 5 fields" 'yes' "$(awk -F"$TAB" '{if (NF != 5) bad++} END{print (bad ? "no" : "yes")}' "$TMP/vscale-brief.out")"
+t; assert_eq "scale: --brief snippet is at most 120 bytes" 'yes' "$(awk -F"$TAB" '{if (length($5) > 120) bad++} END{print (bad ? "no" : "yes")}' "$TMP/vscale-brief.out")"
+t; assert_eq "scale: --brief honours --limit 50 at scale" '50' "$(awk 'END{print NR}' "$TMP/vscale-brief.out")"
 
 # ---- summary ----
 

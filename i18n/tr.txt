@@ -3,12 +3,13 @@ usage_head=Kullanım: quipu KOMUT [seçenekler]
 usage_doctor=  doctor    ortamı denetle: araçlar, lehçeler, vault, ajanlar
 usage_capture=  capture   activity.log'a araç kullanım olayı ekle (stdin okur)
 usage_index=  index     .quipu/index.tsv üret/güncelle (artımlı)
-usage_search=  search    indeks üzerinde katlanmış sözcüksel + BM25 arama
+usage_search=  search    indeks üzerinde katlanmış sözcüksel + BM25 arama (--brief: 120 baytlık künye)
 usage_init=  init      .quipu/ ve AGENTS.md köprü bloğunu kur
 usage_context=  context   ajan için oturum hafızası bağlamını bas
 err_unknown=bilinmeyen komut:
 err_no_vault=vault bulunamadı (.quipu/ yok); çalıştır: quipu init
 err_missing_arg=zorunlu argüman eksik
+err_unknown_flag=bilinmeyen bayrak: %s
 # doctor
 doc_head=quipu doctor - ortam denetimi
 doc_ok=ok
@@ -80,10 +81,18 @@ bridge_updated=AGENTS.md bağlam bloğu güncellendi
 err_conflict=seçenekler birbirini dışlıyor
 # layout
 layout_inbox=hızlı, işlenmemiş notların iniş noktası
+layout_dump=gelen kutusunun içinde ayıklanmamış döküm
+layout_command=panel ve günlük giriş noktası
 layout_projects=aktif iş, proje başına bir alt klasör
 layout_knowledge=kalıcı notlar ve referanslar
+layout_arsenal=araçlar, betikler ve yeniden kullanılabilir parçalar
 layout_sessions=oturum başına hafıza (FAZ 3 SessionEnd)
 layout_companion=companion personası ve kimlik
+layout_archive=bitmiş ya da donmuş malzeme
+layout_templates=not şablonları; kopyala, yerinde düzenleme
 # threads
 threads_seed_title=# Konular
 threads_seed_note=Bu vault'ta süren iş başlıkları. Yeni satır ekle; quipu bu dosyayı asla yeniden yazmaz.
+# dashboard
+dashboard_seed_title=# Panel
+dashboard_seed_note=Bu vault'un giriş noktası. Bağlantıları ve günün odağını ekle; quipu bu dosyayı asla yeniden yazmaz.

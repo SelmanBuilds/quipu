@@ -7,8 +7,25 @@
 # Invoke : awk -v mode=bm25 -v terms="..." -f lib/search.awk index.tsv
 #          `terms` is the query, already folded to ASCII and lowercased by
 #          the caller (same fold profile + tr 'A-Z' 'a-z' as the index).
+#          Add -v brief=1 -v snip=120 to request the snippet column (J-5).
 # Output : skor<TAB>yol<TAB>başlık<TAB>etiketler   (skor %.3f). Documents that
 #          match no query term are suppressed.
+#          With brief=1 a 5th TAB-separated column is appended: the leading
+#          `snip` units (default 120) of the folded field, trimmed back to
+#          the last word boundary inside that window so no word is split.
+#          A field no longer than `snip` is emitted whole. The snippet
+#          carries no marker and no ellipsis, and the cut uses only
+#          substr()/length()/index() — no regex, no gsub — so the PLAN 4.11
+#          no-literal-backslash contract still holds. Without brief the
+#          4-column row is emitted byte-for-byte as before.
+#
+#          `snip` unit caveat: length()/substr() count CHARACTERS in gawk but
+#          BYTES in mawk/BWK awk, so `snip` is a byte budget only where the
+#          folded field is ASCII — which is what the tr fold profile produces.
+#          Under fold=default the field keeps its multi-byte characters, so a
+#          window with no space in it can be cut mid-character on byte-based
+#          awks. Accepted limitation (FAZ 7 L-5), not a correctness bug: the
+#          snippet is a display hint, never a key or a matching input.
 #
 # Contract (PLAN 4.11): no literal backslash; no regex beyond split()/index()
 # (both take plain string separators). Word matching pads each field with
@@ -32,6 +49,7 @@ BEGIN {
   n = 0
   qc = split(terms, qw, " ")
   fallback = 0
+  if (snip + 0 <= 0) snip = 120
 }
 
 {
@@ -108,7 +126,11 @@ END {
       score += contrib
     }
     if (matched) {
-      printf "%.3f%c%s%c%s%c%s%c", score, 9, path[d], 9, title[d], 9, tags[d], 10
+      if (brief + 0) {
+        printf "%.3f%c%s%c%s%c%s%c%s%c", score, 9, path[d], 9, title[d], 9, tags[d], 9, snippet(folded[d], snip), 10
+      } else {
+        printf "%.3f%c%s%c%s%c%s%c", score, 9, path[d], 9, title[d], 9, tags[d], 10
+      }
     }
   }
 }
@@ -124,4 +146,15 @@ function count_occ(s, needle,   pos, cnt, len, rest) {
     pos = index(rest, needle)
   }
   return cnt
+}
+
+# First `max` bytes of s, trimmed back to the last space inside the window so
+# the snippet never ends mid-word. substr/length only (PLAN 4.11).
+function snippet(s, max,   cut, i) {
+  if (length(s) <= max) return s
+  cut = substr(s, 1, max)
+  for (i = length(cut); i >= 1; i--) {
+    if (substr(cut, i, 1) == " ") return substr(cut, 1, i - 1)
+  }
+  return cut
 }

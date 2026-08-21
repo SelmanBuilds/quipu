@@ -82,11 +82,23 @@ _q_msg() {
 }
 
 _q_die() {
-  _q_msg "$1" >&2
+  # _q_die key [code [arg…]] — extra args are printf'd into the message format
+  # (FAZ 7 J-2). Legacy `key [code]` calls behave exactly as before.
+  _q_dk=$1
+  shift
+  _q_dc=${1:-1}
+  [ "$#" -eq 0 ] || shift
+  if [ "$#" -gt 0 ]; then
+    _q_dfmt=$(_q_msg "$_q_dk")
+    # shellcheck disable=SC2059
+    printf "$_q_dfmt\n" "$@" >&2
+  else
+    _q_msg "$_q_dk" >&2
+  fi
   if [ "${QUIPU_HOOK:-0}" = 1 ]; then
     exit 0
   fi
-  exit "${2:-1}"
+  exit "$_q_dc"
 }
 
 _q_warn() {
@@ -362,6 +374,7 @@ _q_cmd_capture() {
       --event) _q_flag=1; [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_ev=$2; shift 2 ;;
       --tool)  _q_flag=1; [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_tool=$2; shift 2 ;;
       --path)  _q_flag=1; [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_p=$2; shift 2 ;;
+      -*) _q_die err_unknown_flag 2 "$1" ;;
       *) _q_die err_missing_arg 2 ;;
     esac
   done
@@ -452,6 +465,7 @@ _q_cmd_init() {
       --plain) _q_plain=1; shift ;;
       --git) _q_git=1; shift ;;
       --lang) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_lang=$2; shift 2 ;;
+      -*) _q_die err_unknown_flag 2 "$1" ;;
       *) _q_die err_missing_arg 2 ;;
     esac
   done
@@ -529,8 +543,9 @@ _q_cmd_init() {
     fi
   done < "$_q_HOME/layout/$_q_layout.txt"
 
-  # Companion folder name (needed for the seed and the bridge body).
+  # Companion and command-center folder names (seeds + bridge body).
   _q_cname=
+  _q_dname=
   while IFS= read -r _q_ln; do
     [ -n "$_q_ln" ] || continue
     case "$_q_ln" in
@@ -538,6 +553,7 @@ _q_cmd_init() {
     esac
     _q_slug=${_q_ln%%"$_q_tab"*}
     [ "$_q_slug" = companion ] && _q_cname=${_q_ln#*"$_q_tab"}
+    [ "$_q_slug" = command ] && _q_dname=${_q_ln#*"$_q_tab"}
   done < "$_q_HOME/layout/$_q_layout.txt"
 
   # Seeds: only-if-missing, never touched again (spec 4.2, B-9).
@@ -556,6 +572,11 @@ _q_cmd_init() {
 
   if [ ! -f "$_q_v/Threads.md" ]; then
     printf '%s\n%s\n' "$(_q_msg threads_seed_title)" "$(_q_msg threads_seed_note)" > "$_q_v/Threads.md"
+    _q_changed=1
+  fi
+
+  if [ -n "$_q_dname" ] && [ ! -f "$_q_v/$_q_dname/Dashboard.md" ]; then
+    printf '%s\n%s\n' "$(_q_msg dashboard_seed_title)" "$(_q_msg dashboard_seed_note)" > "$_q_v/$_q_dname/Dashboard.md"
     _q_changed=1
   fi
 
@@ -693,6 +714,7 @@ _q_cmd_context() {
       --json) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_ev=$2; shift 2 ;;
       --limit) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_limit=$2; shift 2 ;;
       --bridge) _q_bridge=1; shift ;;
+      -*) _q_die err_unknown_flag 2 "$1" ;;
       *) _q_die err_missing_arg 2 ;;
     esac
   done
@@ -774,6 +796,7 @@ _q_cmd_remember() {
       --git) _q_git=1; shift ;;
       --dry-run) _q_dry=1; shift ;;
       --limit) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_limit=$2; shift 2 ;;
+      -*) _q_die err_unknown_flag 2 "$1" ;;
       *) _q_die err_missing_arg 2 ;;
     esac
   done
@@ -963,11 +986,14 @@ _q_cmd_index() {
 _q_cmd_search() {
   _q_limit=10
   _q_paths=0
+  _q_brief=0
   _q_query=
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --limit) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_limit=$2; shift 2 ;;
       --paths) _q_paths=1; shift ;;
+      --brief) _q_brief=1; shift ;;
+      -*) _q_die err_unknown_flag 2 "$1" ;;
       *)
         if [ -n "$_q_query" ]; then
           _q_query="$_q_query $1"
@@ -978,6 +1004,10 @@ _q_cmd_search() {
         ;;
     esac
   done
+
+  if [ "$_q_brief" -eq 1 ] && [ "$_q_paths" -eq 1 ]; then
+    _q_die err_conflict 2
+  fi
 
   _q_v=$(_q_vault)
 
@@ -1007,7 +1037,8 @@ _q_cmd_search() {
   [ -f "$_q_v/.quipu/index.tsv" ] || _q_die err_no_index
 
   _q_tab=$(printf '\t')
-  awk -v mode=bm25 -v terms="$_q_terms" -f "$_q_HOME/lib/search.awk" "$_q_v/.quipu/index.tsv" \
+  awk -v mode=bm25 -v terms="$_q_terms" -v brief="$_q_brief" -v snip=120 \
+    -f "$_q_HOME/lib/search.awk" "$_q_v/.quipu/index.tsv" \
     | sort -k1,1nr -k4,4nr \
     | head -n "$_q_limit" \
     | awk -v p="$_q_paths" -F "$_q_tab" '{ if (p == 1) print $2; else print $0 }'
