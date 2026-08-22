@@ -62,7 +62,7 @@ ctx_threads=threads
 ctx_index=index stats
 ctx_empty=no memory yet
 ctx_truncated=… (truncated)
-ctx_precompact=Context may be compacted: write your memory now — update Threads.md and append today's session summary to the %s folder.
+ctx_precompact=Context may be compacted: write your memory now — fill the reflection block in today's session file (%s) and update Threads.md.
 # remember
 usage_remember=  remember  write mechanical digest from activity.log (append-only)
 remember_ok=wrote: %s
@@ -76,6 +76,7 @@ bridge_run=Run: quipu context
 bridge_layout=Layout:
 bridge_companion=Companion persona: %s/companion.md
 bridge_append=Append-only: quipu never rewrites these files.
+bridge_reflect=Session end protocol: fill the reflection block in today's session file, update Threads.md, and append new lines to the vault folders. quipu never rewrites these texts.
 bridge_claude=See AGENTS.md for vault layout and rules.
 bridge_updated=AGENTS.md context block updated
 err_conflict=options are mutually exclusive
@@ -93,6 +94,12 @@ layout_templates=note templates; copy them, do not edit in place
 # threads
 threads_seed_title=# Threads
 threads_seed_note=Ongoing threads in this vault. Append new lines; quipu never rewrites this file.
+# reflect
+reflect_head_what=What changed in this session?
+reflect_head_where=Where did the work happen?
+reflect_head_threads=Threads touched or continued
+ctx_reflect_ask=Session end: fill the reflection block in %s (between the %s markers) with what changed, where, and which threads.
+ctx_reflect_missed=Missed reflection: the session of %s had %s events and its reflection block was never filled.
 # dashboard
 dashboard_seed_title=# Dashboard
 dashboard_seed_note=Entry point for this vault. Append links and today's focus; quipu never rewrites this file.

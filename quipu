@@ -157,6 +157,29 @@ _q_mdlist() {
   fi | sed 's|^\./||' | _q_md_filter
 }
 
+_q_reflect_filled() {
+  # FAZ 8 (Y-2): reflection-block fullness detection. A block between the
+  # quipu:reflect markers is "filled" when it holds at least one line that is
+  # not a marker, not a "### " heading, and not blank. No mtime reads
+  # (S-5.2); the check is content-based so a same-day edit by the model is
+  # seen immediately. Single home: both `context` and `remember` call this.
+  # Sets _q_rf=1 when filled, _q_rf=0 when absent or empty.
+  _q_rf=0
+  [ -f "$1" ] || return 0
+  if awk '
+    index($0, "quipu:reflect:start") { inblk = 1; next }
+    index($0, "quipu:reflect:end")   { inblk = 0; next }
+    !inblk { next }
+    length($0) == 0 { next }
+    substr($0, 1, 4) == "### " { next }
+    { found = 1; exit }
+    END { exit !found }
+  ' "$1"; then
+    _q_rf=1
+  fi
+  return 0
+}
+
 # ---- init -------------------------------------------------------------------
 
 _q_HOME=$(_q_home)
@@ -603,6 +626,8 @@ _q_cmd_init() {
     # shellcheck disable=SC2059
     printf "$(_q_msg bridge_companion)\n" "$_q_cname"
     printf '%s\n' "$(_q_msg bridge_append)"
+    # FAZ 8 (Y-6): the memory protocol is DATA (i18n), never code-embedded.
+    printf '%s\n' "$(_q_msg bridge_reflect)"
   } | awk -f "$_q_HOME/lib/block.awk" "$_q_v/AGENTS.md" > "$_q_v/.quipu/agents.tmp" && mv "$_q_v/.quipu/agents.tmp" "$_q_v/AGENTS.md"
 
   # CLAUDE.md: thin pointer, single marker block (spec 4.4, B-14/B-15).
@@ -764,6 +789,47 @@ _q_cmd_context() {
     fi
   fi
 
+  # FAZ 8 (Y-3/Y-4): SessionStart-only reflection prompts.
+  if [ -n "$_q_ev" ] && [ "$_q_ev" = SessionStart ]; then
+    # Y-3: one-shot missed-reflection notice, placed at the TOP of the
+    # context; the flag file is deleted here (single shot).
+    if [ -f "$_q_v/.quipu/needs_reflection" ]; then
+      _q_miss=$(cat "$_q_v/.quipu/needs_reflection")
+      rm -f "$_q_v/.quipu/needs_reflection"
+      _q_miss_day=${_q_miss%% *}
+      _q_miss_n=${_q_miss#* }
+      # ctx_reflect_missed carries two %s (day, count); resolved by printf.
+      # shellcheck disable=SC2059
+      _q_missmsg=$(printf "$(_q_msg ctx_reflect_missed)" "$_q_miss_day" "$_q_miss_n")
+      _q_text="${_q_missmsg}
+${_q_text}"
+    fi
+    # Y-4: when today's session file exists and its block is empty, ask the
+    # model to fill it; the message names the block path and the marker.
+    _q_lay=
+    if [ -f "$_q_v/.quipu/config" ]; then
+      _q_lay=$(awk -F= -v k=layout '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+    fi
+    case "$_q_lay" in
+      emoji|plain) : ;;
+      *) _q_lay=emoji ;;
+    esac
+    _q_tab=$(printf '\t')
+    _q_sess=$(awk -F"$_q_tab" '$1=="sessions"{print $2;exit}' "$_q_HOME/layout/$_q_lay.txt" 2>/dev/null || true)
+    _q_day=$(date +%Y-%m-%d)
+    _q_today="$_q_v/$_q_sess/$_q_day.md"
+    if [ -f "$_q_today" ]; then
+      _q_reflect_filled "$_q_today"
+      if [ "$_q_rf" -eq 0 ]; then
+        # ctx_reflect_ask carries two %s (path, marker name); resolved here.
+        # shellcheck disable=SC2059
+        _q_ask=$(printf "$(_q_msg ctx_reflect_ask)" "$_q_sess/$_q_day.md" 'quipu:reflect')
+        _q_text="${_q_text}${_q_ask}
+"
+      fi
+    fi
+  fi
+
   if [ "$_q_bridge" -eq 1 ]; then
     # H-11/H-13: write the context into a dedicated AGENTS.md block, never the
     # static quipu:start block (init's property). printf (not echo) preserves
@@ -874,11 +940,78 @@ _q_cmd_remember() {
   mkdir -p "$_q_v/$_q_sessions"
   cat "$_q_body" >> "$_q_v/$_q_rel"
 
+  # FAZ 8 (Y-1): reflection block, appended ONLY when absent. Detection is the
+  # marker's existence (awk index, per spec); a present block is never touched
+  # so the model's own lines survive a same-day second `remember`. block.awk
+  # is NOT used here — it replaces block content, which would erase what the
+  # model wrote. The insertion is a plain append; append-only stays intact.
+  if ! awk 'index($0, "quipu:reflect:start") { found = 1 } END { exit !found }' "$_q_v/$_q_rel"; then
+    {
+      printf '%s\n' '<!-- quipu:reflect:start -->'
+      printf '### %s\n' "$(_q_msg reflect_head_what)"
+      printf '%s\n' ''
+      printf '### %s\n' "$(_q_msg reflect_head_where)"
+      printf '%s\n' ''
+      printf '### %s\n' "$(_q_msg reflect_head_threads)"
+      printf '%s\n' ''
+      printf '%s\n' '<!-- quipu:reflect:end -->'
+    } >> "$_q_v/$_q_rel"
+  fi
+
   _q_ls_body="$_q_day · $_q_count events · $_q_rel"
   : >> "$_q_v/Last-Session.md"
   printf '%s\n' "$_q_ls_body" | awk -f "$_q_HOME/lib/block.awk" "$_q_v/Last-Session.md" > "$_q_v/.quipu/lastsession.tmp" && mv "$_q_v/.quipu/lastsession.tmp" "$_q_v/Last-Session.md"
 
   printf '%s\n' "$_q_last" > "$_q_wm"
+
+  # FAZ 8 (Y-3): missed-reflection catcher. When the most recent previous
+  # session file's block is empty, a one-line flag (day + event count) is
+  # written to .quipu/needs_reflection; the next `context --json SessionStart`
+  # shows it once and deletes it. The flag lives under .quipu/, never in the
+  # visible vault tree. No mtime is consulted (S-5.2); "previous" is the
+  # lexicographically latest YYYY-MM-DD session file strictly before today.
+  _q_prev=
+  _q_prevn=0
+  _q_dayn=$(printf '%s\n' "$_q_day" | tr -d '-')
+  for _q_f in "$_q_v/$_q_sessions"/*.md; do
+    [ -f "$_q_f" ] || continue
+    _q_base=${_q_f##*/}
+    _q_d=${_q_base%.md}
+    case "$_q_d" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) : ;;
+      *) continue ;;
+    esac
+    _q_dn=$(printf '%s\n' "$_q_d" | tr -d '-')
+    if [ "$_q_dn" -lt "$_q_dayn" ] && [ "$_q_dn" -gt "$_q_prevn" ]; then
+      _q_prevn=$_q_dn
+      _q_prev=$_q_d
+    fi
+  done
+  if [ -n "$_q_prev" ]; then
+    _q_reflect_filled "$_q_v/$_q_sessions/$_q_prev.md"
+    if [ "$_q_rf" -eq 0 ]; then
+      # Event count: parenthesized integer on the digest Range line(s) of the
+      # mechanical area (quipu's own output, before the reflection marker).
+      # The files/tools headers ("(top 10)" / "(en çok 10)") are skipped by
+      # requiring the parenthesized text to start with a digit.
+      _q_prev_count=$(awk '
+        index($0, "quipu:reflect:start") { stop = 1 }
+        stop { next }
+        {
+          p = index($0, "(")
+          if (p > 0) {
+            s = substr($0, p + 1)
+            if (substr(s, 1, 1) >= "0" && substr(s, 1, 1) <= "9") {
+              n = s + 0
+              if (n > 0) sum = sum + n
+            }
+          }
+        }
+        END { print sum + 0 }
+      ' "$_q_v/$_q_sessions/$_q_prev.md")
+      printf '%s %s\n' "$_q_prev" "$_q_prev_count" > "$_q_v/.quipu/needs_reflection"
+    fi
+  fi
 
   if [ "$_q_git" -eq 1 ] && command -v git >/dev/null 2>&1; then
     if (cd "$_q_v" && git rev-parse --git-dir >/dev/null 2>&1); then

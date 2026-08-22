@@ -669,7 +669,7 @@ assert_eq "remember: writes session file and watermark" 'yes' \
 printf '%s\n' '2026-08-20T10:03 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr31/.quipu/activity.log"
 t; OUT=$(rem vr31); RC=$?
 assert_eq "remember: appends second section same day" 'yes' \
-  "$([ "$RC" -eq 0 ] && [ "$(grep -c '## ' "$TMP/vr31/700-Sessions/$D.md")" = 2 ] && grep -qF '2026-08-20T10:00' "$TMP/vr31/700-Sessions/$D.md" && printf yes || printf no)"
+  "$([ "$RC" -eq 0 ] && [ "$(grep -c '^## ' "$TMP/vr31/700-Sessions/$D.md")" = 2 ] && grep -qF '2026-08-20T10:00' "$TMP/vr31/700-Sessions/$D.md" && printf yes || printf no)"
 
 t; BEFORE=$(wc -l < "$TMP/vr31/700-Sessions/$D.md" | tr -d ' ')
 OUT=$(rem vr31); RC=$?
@@ -1187,6 +1187,175 @@ QUIPU_VAULT="$TMP/vscale" QUIPU_LANG=en sh "$ROOT/quipu" search ortakterim --lim
 t; assert_eq "scale: --brief rows have 5 fields" 'yes' "$(awk -F"$TAB" '{if (NF != 5) bad++} END{print (bad ? "no" : "yes")}' "$TMP/vscale-brief.out")"
 t; assert_eq "scale: --brief snippet is at most 120 bytes" 'yes' "$(awk -F"$TAB" '{if (length($5) > 120) bad++} END{print (bad ? "no" : "yes")}' "$TMP/vscale-brief.out")"
 t; assert_eq "scale: --brief honours --limit 50 at scale" '50' "$(awk 'END{print NR}' "$TMP/vscale-brief.out")"
+
+# ---- FAZ 8: reflection block + missed-reflection catcher (T-96..T-108) ----
+
+# T-96: the first `remember` appends a reflection block; the three headings
+# come from i18n (QUIPU_LANG=en).
+mkrem vr96
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr96/.quipu/activity.log"
+t; rem vr96 >/dev/null 2>&1
+assert_eq "reflect: first remember appends a block with three i18n headings" 'yes' \
+  "$(grep -q '^<!-- quipu:reflect:start -->$' "$TMP/vr96/700-Sessions/$D.md" \
+     && grep -q '^<!-- quipu:reflect:end -->$' "$TMP/vr96/700-Sessions/$D.md" \
+     && grep -qF "### $(i18n reflect_head_what)" "$TMP/vr96/700-Sessions/$D.md" \
+     && grep -qF "### $(i18n reflect_head_where)" "$TMP/vr96/700-Sessions/$D.md" \
+     && grep -qF "### $(i18n reflect_head_threads)" "$TMP/vr96/700-Sessions/$D.md" \
+     && printf yes || printf no)"
+
+# T-97: a model line inside the block survives a same-day second `remember`;
+# no second block is added. The block sits at EOF after the first remember, so
+# the end marker is re-appended around the model line (sed '$d' drops it).
+sed '$d' "$TMP/vr96/700-Sessions/$D.md" > "$TMP/vr96/.tmp"
+printf '%s\n' 'Model wrote this reflection line.' >> "$TMP/vr96/.tmp"
+printf '%s\n' '<!-- quipu:reflect:end -->' >> "$TMP/vr96/.tmp"
+mv "$TMP/vr96/.tmp" "$TMP/vr96/700-Sessions/$D.md"
+printf '%s\n' '2026-08-20T10:01 | PostToolUse | Read | 500-Knowledge/other.md' >> "$TMP/vr96/.quipu/activity.log"
+t; rem vr96 >/dev/null 2>&1
+assert_eq "reflect: same-day second remember keeps the model line, one block" 'yes' \
+  "$(grep -qF 'Model wrote this reflection line.' "$TMP/vr96/700-Sessions/$D.md" \
+     && [ "$(grep -c 'quipu:reflect:start' "$TMP/vr96/700-Sessions/$D.md")" = 1 ] \
+     && printf yes || printf no)"
+
+# T-98: user text written OUTSIDE the block survives further remembers
+# (append-only regression; the reflection block is never rewritten).
+printf '%s\n' 'User note outside the reflection block.' >> "$TMP/vr96/700-Sessions/$D.md"
+printf '%s\n' '2026-08-20T10:02 | PostToolUse | Write | 000-Inbox/i.md' >> "$TMP/vr96/.quipu/activity.log"
+t; rem vr96 >/dev/null 2>&1
+assert_eq "reflect: user text outside the block preserved" 'yes' \
+  "$(grep -qF 'User note outside the reflection block.' "$TMP/vr96/700-Sessions/$D.md" \
+     && [ "$(grep -c 'quipu:reflect:start' "$TMP/vr96/700-Sessions/$D.md")" = 1 ] \
+     && printf yes || printf no)"
+
+# T-99: a block holding only markers + headings + blank lines is EMPTY, so the
+# SessionStart ask appears. (ctx_reflect_ask is the controlled i18n template;
+# its two %s are the path and the marker name — SC2059 pattern.)
+mkrem vr99
+{
+  printf '%s\n' '<!-- quipu:reflect:start -->'
+  printf '### %s\n' "$(i18n reflect_head_what)"
+  printf '%s\n' ''
+  printf '### %s\n' "$(i18n reflect_head_where)"
+  printf '%s\n' ''
+  printf '### %s\n' "$(i18n reflect_head_threads)"
+  printf '%s\n' ''
+  printf '%s\n' '<!-- quipu:reflect:end -->'
+} > "$TMP/vr99/700-Sessions/$D.md"
+t; A99=$(QUIPU_VAULT="$TMP/vr99" QUIPU_LANG=en sh "$ROOT/quipu" context --json SessionStart)
+A99D=$(printf '%s' "$A99" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+# shellcheck disable=SC2059
+A99_EXPECT=$(printf "$(i18n ctx_reflect_ask)" "700-Sessions/$D.md" 'quipu:reflect')
+assert_eq "reflect: headings and blanks do not count as content" 'yes' \
+  "$(printf '%s\n' "$A99D" | grep -qF "$A99_EXPECT" && printf yes || printf no)"
+
+# T-100: one content line makes the block filled: no ask.
+mkrem vr100
+{
+  printf '%s\n' '<!-- quipu:reflect:start -->'
+  printf '### %s\n' "$(i18n reflect_head_what)"
+  printf '%s\n' ''
+  printf '%s\n' 'a single reflection line'
+  printf '%s\n' '<!-- quipu:reflect:end -->'
+} > "$TMP/vr100/700-Sessions/$D.md"
+t; A100=$(QUIPU_VAULT="$TMP/vr100" QUIPU_LANG=en sh "$ROOT/quipu" context --json SessionStart)
+A100D=$(printf '%s' "$A100" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+# shellcheck disable=SC2059
+A100_EXPECT=$(printf "$(i18n ctx_reflect_ask)" "700-Sessions/$D.md" 'quipu:reflect')
+assert_eq "reflect: one content line -> block filled, no ask" 'no' \
+  "$(printf '%s\n' "$A100D" | grep -qF "$A100_EXPECT" && printf yes || printf no)"
+
+# T-101: an empty-block PREVIOUS day + remember -> needs_reflection written as
+# "day count", the count parsed from the digest Range line ((3 events)); the
+# "(top 10)" files header must NOT be counted.
+mkrem vr101
+{
+  printf '%s\n' '## 09:00'
+  printf '%s\n' 'Range: 08:00 → 09:00 (3 events)'
+  printf '%s\n' 'Tools: Read 3'
+  printf '%s\n' 'Touched files (top 10):'
+  printf '%s\n' '  -  3  prev.md'
+  printf '%s\n' '<!-- quipu:reflect:start -->'
+  printf '### %s\n' "$(i18n reflect_head_what)"
+  printf '%s\n' ''
+  printf '%s\n' '<!-- quipu:reflect:end -->'
+} > "$TMP/vr101/700-Sessions/2020-01-01.md"
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr101/.quipu/activity.log"
+t; rem vr101 >/dev/null 2>&1
+assert_eq "reflect: empty previous block -> needs_reflection written" '2020-01-01 3' "$(cat "$TMP/vr101/.quipu/needs_reflection")"
+
+# T-102: SessionStart puts the missed notice in the context and deletes the
+# flag (single shot).
+t; M102=$(QUIPU_VAULT="$TMP/vr101" QUIPU_LANG=en sh "$ROOT/quipu" context --json SessionStart)
+M102D=$(printf '%s' "$M102" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+# shellcheck disable=SC2059
+M102_EXPECT=$(printf "$(i18n ctx_reflect_missed)" '2020-01-01' '3')
+assert_eq "reflect: SessionStart shows missed notice and deletes the flag" 'yes' \
+  "$(printf '%s\n' "$M102D" | grep -qF "$M102_EXPECT" \
+     && [ ! -f "$TMP/vr101/.quipu/needs_reflection" ] && printf yes || printf no)"
+
+# T-103: a second SessionStart carries no missed notice.
+t; M103=$(QUIPU_VAULT="$TMP/vr101" QUIPU_LANG=en sh "$ROOT/quipu" context --json SessionStart)
+M103D=$(printf '%s' "$M103" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+assert_eq "reflect: second SessionStart has no missed notice" 'no' \
+  "$(printf '%s\n' "$M103D" | grep -qF "$M102_EXPECT" && printf yes || printf no)"
+
+# T-104: a filled previous-day block -> no needs_reflection at all.
+mkrem vr104
+{
+  printf '%s\n' '## 09:00'
+  printf '%s\n' 'Range: 08:00 → 09:00 (3 events)'
+  printf '%s\n' '<!-- quipu:reflect:start -->'
+  printf '### %s\n' "$(i18n reflect_head_what)"
+  printf '%s\n' 'filled content line'
+  printf '%s\n' '<!-- quipu:reflect:end -->'
+} > "$TMP/vr104/700-Sessions/2020-01-01.md"
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Edit | 500-Knowledge/not.md' >> "$TMP/vr104/.quipu/activity.log"
+t; rem vr104 >/dev/null 2>&1
+assert_eq "reflect: filled previous block -> no needs_reflection" 'no' \
+  "$([ -f "$TMP/vr104/.quipu/needs_reflection" ] && printf yes || printf no)"
+
+# T-105: today's empty block -> the SessionStart ask names the session path
+# and the quipu:reflect marker.
+mkrem vr105
+{
+  printf '%s\n' '<!-- quipu:reflect:start -->'
+  printf '### %s\n' "$(i18n reflect_head_what)"
+  printf '%s\n' ''
+  printf '%s\n' '<!-- quipu:reflect:end -->'
+} > "$TMP/vr105/700-Sessions/$D.md"
+t; A105=$(QUIPU_VAULT="$TMP/vr105" QUIPU_LANG=en sh "$ROOT/quipu" context --json SessionStart)
+A105D=$(printf '%s' "$A105" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+assert_eq "reflect: ask names the path and the marker" 'yes' \
+  "$(printf '%s\n' "$A105D" | grep -qF "700-Sessions/$D.md" \
+     && printf '%s\n' "$A105D" | grep -qF 'quipu:reflect' && printf yes || printf no)"
+
+# T-106: the updated ctx_precompact text points at the reflection block.
+mkrem vr106
+printf 'lang=en\n' >> "$TMP/vr106/.quipu/config"
+printf '%s\n' '2026-08-20T10:00 | PostToolUse | Read | x.md' >> "$TMP/vr106/.quipu/activity.log"
+# ctx_precompact is the controlled i18n template; the argument is a folder name.
+# shellcheck disable=SC2059
+CP106=$(printf "$(i18n ctx_precompact)" '700-Sessions')
+t; NJ106=$(QUIPU_NUDGE_AFTER=0 QUIPU_VAULT="$TMP/vr106" QUIPU_LANG=en sh "$ROOT/quipu" context --json UserPromptSubmit)
+NJ106D=$(printf '%s' "$NJ106" | awk -f "$LIB/jsonfield.awk" -f "$DRV/hookctx.awk" -)
+assert_eq "reflect: ctx_precompact points at the reflection block" 'yes' \
+  "$(printf '%s\n' "$NJ106D" | grep -qF "$CP106" \
+     && printf '%s\n' "$NJ106D" | grep -qF 'reflection block' && printf yes || printf no)"
+
+# T-107: the AGENTS.md bridge body carries the memory protocol paragraph from
+# i18n; raw reflect_/ctx_reflect_ keys never appear (a missing key would leak
+# its name through _q_msg's fallback).
+mkrem vr107
+QUIPU_VAULT="$TMP/vr107" sh "$ROOT/quipu" init >/dev/null 2>&1
+t; assert_eq "reflect: bridge protocol paragraph, no raw keys" 'yes' \
+  "$(grep -qF "$(i18n bridge_reflect)" "$TMP/vr107/AGENTS.md" \
+     && ! grep -qE 'reflect_head_|ctx_reflect_' "$TMP/vr107/AGENTS.md" && printf yes || printf no)"
+
+# T-108: static honesty gates (S-5 is not repeated). python3 appears nowhere
+# in quipu; the "stat " line count stays pinned at its FAZ 7 value (6: the
+# mtime() wrapper plus the doctor dialect probe) — FAZ 8 adds no stat usage.
+t; assert_eq "reflect: no python3, stat count pinned" '6 0' \
+  "$(grep -c 'stat ' "$ROOT/quipu") $(grep -c 'python3' "$ROOT/quipu")"
 
 # ---- summary ----
 

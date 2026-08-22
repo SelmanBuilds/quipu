@@ -62,7 +62,7 @@ ctx_threads=konular
 ctx_index=indeks istatistiği
 ctx_empty=henüz hafıza yok
 ctx_truncated=… (kırpıldı)
-ctx_precompact=Bağlam sıkışabilir: hafızanı şimdi yaz — Threads.md'yi güncelle ve %s klasörüne bugünkü oturum özetini ekle.
+ctx_precompact=Bağlam sıkışabilir: hafızanı şimdi yaz — bugünkü oturum dosyasındaki (%s) yansıma bloğunu doldur ve Threads.md'yi güncelle.
 # remember
 usage_remember=  remember  activity.log'dan mekanik sindirim yaz (append-only)
 remember_ok=yazıldı: %s
@@ -76,6 +76,7 @@ bridge_run=Çalıştır: quipu context
 bridge_layout=Yerleşim:
 bridge_companion=Companion personası: %s/companion.md
 bridge_append=Yalnızca ekleme: quipu bu dosyaları asla yeniden yazmaz.
+bridge_reflect=Oturum sonu protokolü: bugünkü oturum dosyasındaki yansıma bloğunu doldur, Threads.md'yi güncelle ve vault klasörlerine yeni satırlar ekle. quipu bu metinleri asla yeniden yazmaz.
 bridge_claude=Vault yerleşimi ve kurallar için AGENTS.md'ye bak.
 bridge_updated=AGENTS.md bağlam bloğu güncellendi
 err_conflict=seçenekler birbirini dışlıyor
@@ -93,6 +94,12 @@ layout_templates=not şablonları; kopyala, yerinde düzenleme
 # threads
 threads_seed_title=# Konular
 threads_seed_note=Bu vault'ta süren iş başlıkları. Yeni satır ekle; quipu bu dosyayı asla yeniden yazmaz.
+# reflect
+reflect_head_what=Bu oturumda ne değişti?
+reflect_head_where=İş nerede yapıldı?
+reflect_head_threads=Dokunulan ya da sürdürülen konular
+ctx_reflect_ask=Oturum sonu: %s içindeki yansıma bloğunu (%s işaretçileri arasına) doldur — ne değişti, nerede, hangi konular.
+ctx_reflect_missed=Kaçırılan yansıma: %s oturumunda %s olay vardı ve yansıma bloğu hiç doldurulmadı.
 # dashboard
 dashboard_seed_title=# Panel
 dashboard_seed_note=Bu vault'un giriş noktası. Bağlantıları ve günün odağını ekle; quipu bu dosyayı asla yeniden yazmaz.
