@@ -36,6 +36,8 @@ doc_summary=özet: %d ok, %d uyarı, %d hata
 doc_layout_mismatch=layout/emoji.txt ve layout/plain.txt slug kümeleri farklı
 doc_layout=yerleşim
 doc_layout_missing=config'te layout= değeri yok (çalıştır: quipu init)
+doc_identity=kimlik
+doc_identity_missing=config'te user=/companion= değeri yok (çalıştır: quipu init --user AD --companion AD)
 doc_companion_missing=companion.md yok (çalıştır: quipu init)
 doc_onedrive_vault=vault yolu OneDrive içeriyor (emoji klasör riski, plan 4.9)
 doc_hooks_installed=kurulu
@@ -56,6 +58,9 @@ init_layout=yerleşim: %s
 init_companion=companion.md tohumlandı
 err_layout_conflict=yerleşim çakışması: --plain istendi ama config emoji diyor
 err_layout_unknown=config'te tanınmayan yerleşim değeri
+# persona
+persona_default_companion=Companion
+persona_default_user=Kullanıcı
 # context
 ctx_activity=son etkinlik
 ctx_threads=konular
@@ -74,7 +79,7 @@ digest_files=Dokunulan dosyalar (en çok %d):
 # bridge
 bridge_run=Çalıştır: quipu context
 bridge_layout=Yerleşim:
-bridge_companion=Companion personası: %s/companion.md
+bridge_companion=Companion personası: %s (%s/companion.md)
 bridge_append=Yalnızca ekleme: quipu bu dosyaları asla yeniden yazmaz.
 bridge_reflect=Oturum sonu protokolü: bugünkü oturum dosyasındaki yansıma bloğunu doldur, Threads.md'yi güncelle ve vault klasörlerine yeni satırlar ekle. quipu bu metinleri asla yeniden yazmaz.
 bridge_claude=Vault yerleşimi ve kurallar için AGENTS.md'ye bak.

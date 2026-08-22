@@ -1357,6 +1357,119 @@ t; assert_eq "reflect: bridge protocol paragraph, no raw keys" 'yes' \
 t; assert_eq "reflect: no python3, stat count pinned" '6 0' \
   "$(grep -c 'stat ' "$ROOT/quipu") $(grep -c 'python3' "$ROOT/quipu")"
 
+# ---- FAZ 9: identity + personalized seed + runbook gates (T-110..T-120) ----
+
+# T-110 (V-2): init --user Ada --companion Kuz -> config user=/companion=.
+mkrem v110
+QUIPU_VAULT="$TMP/v110" QUIPU_LANG=en sh "$ROOT/quipu" init --user Ada --companion Kuz >/dev/null 2>&1
+t; assert_eq "identity: config has user and companion lines" 'yes' \
+  "$(grep -q '^user=Ada$' "$TMP/v110/.quipu/config" \
+     && grep -q '^companion=Kuz$' "$TMP/v110/.quipu/config" && printf yes || printf no)"
+
+# T-111 (V-2): a second init --user Baska must never overwrite user=Ada.
+QUIPU_VAULT="$TMP/v110" QUIPU_LANG=en sh "$ROOT/quipu" init --user Baska >/dev/null 2>&1
+t; assert_eq "identity: second init keeps user=Ada" 'yes' \
+  "$(grep -q '^user=Ada$' "$TMP/v110/.quipu/config" \
+     && ! grep -q '^user=Baska$' "$TMP/v110/.quipu/config" && printf yes || printf no)"
+
+# T-112 (V-3): the seed carries both names; no raw %s survives.
+CN110=$(comp_name plain)
+t; assert_eq "identity: companion.md personalized, no raw %s" 'yes' \
+  "$(grep -qF 'Kuz' "$TMP/v110/$CN110/companion.md" \
+     && grep -qF 'Ada' "$TMP/v110/$CN110/companion.md" \
+     && ! grep -qF '%s' "$TMP/v110/$CN110/companion.md" && printf yes || printf no)"
+
+# T-113 (V-3): unnamed init -> neutral i18n defaults, still no raw %s.
+mkrem v113
+t; assert_eq "identity: unnamed init uses neutral defaults, no raw %s" 'yes' \
+  "$(grep -qF "$(i18n persona_default_companion)" "$TMP/v113/$(comp_name plain)/companion.md" \
+     && grep -qF "$(i18n persona_default_user)" "$TMP/v113/$(comp_name plain)/companion.md" \
+     && ! grep -qF '%s' "$TMP/v113/$(comp_name plain)/companion.md" && printf yes || printf no)"
+
+# T-114 (V-3): a user-edited companion.md survives a second init (regression of
+# the only-if-missing guarantee).
+printf '%s\n' 'My custom persona line' >> "$TMP/v113/$(comp_name plain)/companion.md"
+QUIPU_VAULT="$TMP/v113" sh "$ROOT/quipu" init >/dev/null 2>&1
+t; assert_eq "identity: second init preserves edited companion.md" 'yes' \
+  "$(grep -qF 'My custom persona line' "$TMP/v113/$(comp_name plain)/companion.md" \
+     && ! grep -qF '%s' "$TMP/v113/$(comp_name plain)/companion.md" && printf yes || printf no)"
+
+# T-115 (V-4): the AGENTS.md bridge body names the companion; the raw
+# bridge_companion key never leaks (a missing key would print its name).
+t; assert_eq "identity: bridge names companion, no raw key" 'yes' \
+  "$(grep -qF 'Kuz' "$TMP/v110/AGENTS.md" \
+     && ! grep -qF 'bridge_companion' "$TMP/v110/AGENTS.md" && printf yes || printf no)"
+
+# T-116 (V-5): doctor warns when user=/companion= is absent and still exits 0.
+# The identity row is extracted by its message content (both languages carry
+# "user=" and "companion=" in doc_identity_missing), not by a translation.
+mkvault v116
+QUIPU_VAULT="$TMP/v116" QUIPU_LANG=en sh "$ROOT/quipu" init --plain >/dev/null 2>&1
+t; (cd "$TMP/v116" && QUIPU_LANG=en "$ROOT/quipu" doctor) >"$TMP/v116.doc" 2>&1; RC=$?
+assert_eq "identity: doctor with no identity warns, exit 0" '0' "$RC"
+t; assert_eq "identity: warn row extracted language-independently" 'yes' \
+  "$(awk -F"$TAB" '$3 ~ /user=/ && $3 ~ /companion=/ {found=1} END{print (found ? "yes" : "no")}' "$TMP/v116.doc")"
+t; assert_eq "identity: warn row is a warn, not a fail" \
+  "$(i18n doc_warn)" "$(awk -F"$TAB" '$3 ~ /user=/ {print $1; exit}' "$TMP/v116.doc")"
+# With identity present the row turns ok (same extraction path).
+QUIPU_VAULT="$TMP/v116" QUIPU_LANG=en sh "$ROOT/quipu" init --user Ada --companion Kuz >/dev/null 2>&1
+t; (cd "$TMP/v116" && QUIPU_LANG=en "$ROOT/quipu" doctor) >"$TMP/v116b.doc" 2>&1; RC=$?
+assert_eq "identity: doctor with identity ok, exit 0" '0' "$RC"
+t; assert_eq "identity: ok row shows both names" 'yes' \
+  "$(awk -F"$TAB" '$2=="identity" && $3=="Ada/Kuz" {found=1} END{print (found ? "yes" : "no")}' "$TMP/v116b.doc")"
+
+# T-117 (V-2 + FAZ 7 -*) regression: --user starved of its value keeps the old
+# err_missing_arg; --companion followed by a flag diagnoses that flag instead
+# of swallowing it as a name.
+mkvault v117
+t; QUIPU_VAULT="$TMP/v117" QUIPU_LANG=en sh "$ROOT/quipu" init --user \
+  >/dev/null 2>"$TMP/v117-user.err"; RC=$?
+assert_eq "identity: init --user without value exits 2" '2' "$RC"
+t; assert_eq "identity: init --user without value keeps err_missing_arg" \
+  "$(i18n err_missing_arg)" "$(cat "$TMP/v117-user.err")"
+t; QUIPU_VAULT="$TMP/v117" QUIPU_LANG=en sh "$ROOT/quipu" init --companion --bogus \
+  >/dev/null 2>"$TMP/v117-comp.err"; RC=$?
+assert_eq "identity: init --companion --bogus exits 2" '2' "$RC"
+t; # shellcheck disable=SC2059
+assert_eq "identity: init --companion --bogus names the flag" \
+  "$(printf "$(i18n err_unknown_flag)\n" --bogus)" "$(cat "$TMP/v117-comp.err")"
+
+# T-118: the four new keys exist in both languages and the key sets stay equal.
+t; IDKEYS=$(for _k in persona_default_companion persona_default_user doc_identity doc_identity_missing; do
+  for _f in en tr; do
+    grep -q "^$_k=" "$ROOT/i18n/$_f.txt" || printf '%s:%s\n' "$_k" "$_f"
+  done
+done)
+assert_eq "identity: FAZ 9 keys present in both languages" '' "$IDKEYS"
+t; KTR9=$(awk -F= 'NF >= 1 && $1 !~ /^#/ {print $1}' "$ROOT/i18n/tr.txt" | sort)
+KEN9=$(awk -F= 'NF >= 1 && $1 !~ /^#/ {print $1}' "$ROOT/i18n/en.txt" | sort)
+assert_eq "identity: i18n tr/en key sets identical" "$KEN9" "$KTR9"
+
+# T-119: static runbook gate — the platform-specific tool strings never appear
+# in docs/KURULUM.md (ASCII grep; the doc is written without them).
+t; BAD119=$(grep -nE 'brew|python3|osacompile|swift|apt-get|winget' "$ROOT/docs/KURULUM.md" || true)
+assert_eq "runbook: no platform-specific tool strings" '' "$BAD119"
+
+# T-120: every phase heading is present and every command the runbook calls is
+# within the setup whitelist {doctor, init, index, search, context, remember} —
+# compared against the usage list so no invented command can slip in.
+t; MISS120=$(for _n in 0 1 2 3 4 5; do
+  grep -q "^## Faz $_n " "$ROOT/docs/KURULUM.md" || printf '%s\n' "$_n"
+done)
+assert_eq "runbook: every phase heading present (Faz 0..5)" '' "$MISS120"
+t; CMDS120=$(grep -oE 'quipu [a-z-]+' "$ROOT/docs/KURULUM.md" | awk '{print $2}' | sort -u | tr '\n' ' ' | sed 's/ $//')
+assert_eq "runbook: only whitelisted commands called" 'context doctor index init remember search' "$CMDS120"
+t; USAGE120=$(awk -F= '/^usage_/ {sub(/^usage_/,""); print $1}' "$ROOT/i18n/en.txt" | sort | tr '\n' ' ')
+BAD120=$(for _c in $CMDS120; do
+  case " $USAGE120 " in
+    *" $_c "*) : ;;
+    *) printf '%s\n' "$_c" ;;
+  esac
+done)
+assert_eq "runbook: every called command exists in the usage list" '' "$BAD120"
+t; assert_eq "runbook: capture command not mentioned" 'no' \
+  "$(grep -qw capture "$ROOT/docs/KURULUM.md" && printf yes || printf no)"
+
 # ---- summary ----
 
 printf '# pass %d, fail %d, skip %d\n' "$PASS" "$FAIL" "$SKIP"

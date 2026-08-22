@@ -253,6 +253,15 @@ _q_doctor() {
     else
       _q_line ok "$(_q_msg doc_layout)" "$_q_lay"
     fi
+    # FAZ 9 V-5: identity — user= or companion= absent -> warn (exit stays 0).
+    # Mirror of the doc_layout_missing pattern above.
+    _q_idu=$(awk -F= -v k=user '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+    _q_idc=$(awk -F= -v k=companion '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+    if [ -z "$_q_idu" ] || [ -z "$_q_idc" ]; then
+      _q_line warn "$(_q_msg doc_identity)" "$(_q_msg doc_identity_missing)"
+    else
+      _q_line ok "$(_q_msg doc_identity)" "$_q_idu/$_q_idc"
+    fi
     # FAZ 2 (spec 4.6 B-22): companion check, only for a known layout.
     if [ "$_q_lay" = emoji ] || [ "$_q_lay" = plain ]; then
       _q_comp=$(awk -F"$_q_tab" '$1=="companion"{print $2;exit}' "$_q_HOME/layout/$_q_lay.txt" 2>/dev/null || true)
@@ -482,12 +491,24 @@ _q_cmd_init() {
   _q_lang=
   _q_git=0
   _q_plain=0
+  _q_user=
+  _q_cn=
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --plain) _q_plain=1; shift ;;
       --git) _q_git=1; shift ;;
       --lang) [ "$#" -ge 2 ] || _q_die err_missing_arg 2; _q_lang=$2; shift 2 ;;
+      --user) [ "$#" -ge 2 ] || _q_die err_missing_arg 2
+        case "$2" in
+          -*) _q_die err_unknown_flag 2 "$2" ;;
+        esac
+        _q_user=$2; shift 2 ;;
+      --companion) [ "$#" -ge 2 ] || _q_die err_missing_arg 2
+        case "$2" in
+          -*) _q_die err_unknown_flag 2 "$2" ;;
+        esac
+        _q_cn=$2; shift 2 ;;
       -*) _q_die err_unknown_flag 2 "$1" ;;
       *) _q_die err_missing_arg 2 ;;
     esac
@@ -535,6 +556,25 @@ _q_cmd_init() {
     fi
     _q_changed=1
   fi
+
+  # Identity (FAZ 9 V-2): user=/companion= written only when the line is
+  # absent; an existing value is never overwritten (layout= pattern).
+  if [ -n "$_q_user" ] && ! grep -q '^user=' "$_q_v/.quipu/config"; then
+    printf 'user=%s\n' "$_q_user" >> "$_q_v/.quipu/config"
+    _q_changed=1
+  fi
+  if [ -n "$_q_cn" ] && ! grep -q '^companion=' "$_q_v/.quipu/config"; then
+    printf 'companion=%s\n' "$_q_cn" >> "$_q_v/.quipu/config"
+    _q_changed=1
+  fi
+
+  # Effective identity (V-2/V-3/V-4): config wins (never overwritten), then
+  # the flags, then the i18n neutral defaults. Used for the companion.md seed
+  # and the AGENTS.md bridge body.
+  _q_cn_eff=$(awk -F= -v k=companion '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+  _q_us_eff=$(awk -F= -v k=user '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+  [ -n "$_q_cn_eff" ] || _q_cn_eff=${_q_cn:-$(_q_msg persona_default_companion)}
+  [ -n "$_q_us_eff" ] || _q_us_eff=${_q_user:-$(_q_msg persona_default_user)}
 
   if [ ! -f "$_q_v/.quipu/index.tsv" ]; then
     : > "$_q_v/.quipu/index.tsv"
@@ -587,7 +627,13 @@ _q_cmd_init() {
       _q_pers=en
     fi
     if [ ! -f "$_q_v/$_q_cname/companion.md" ]; then
-      cp "$_q_HOME/persona/$_q_pers.md" "$_q_v/$_q_cname/companion.md"
+      # FAZ 9 V-3: persona/<lang>.md is DATA carrying two %s placeholders
+      # (companion name, user name; order documented in its first comment
+      # line). printf fills them — no {{...}} template engine. Names resolve
+      # to the effective identity; absent names get i18n neutral values, so
+      # no raw %s survives into companion.md.
+      # shellcheck disable=SC2059
+      printf "$(cat "$_q_HOME/persona/$_q_pers.md")\n" "$_q_cn_eff" "$_q_us_eff" > "$_q_v/$_q_cname/companion.md"
       _q_changed=1
       _q_comp=1
     fi
@@ -622,9 +668,10 @@ _q_cmd_init() {
       _q_name=${_q_ln#*"$_q_tab"}
       printf '  - %s — %s\n' "$_q_name" "$(_q_msg "layout_$_q_slug")"
     done < "$_q_HOME/layout/$_q_layout.txt"
-    # bridge_companion carries %s; resolved by printf below (SC2059 pattern).
+    # bridge_companion carries two %s — companion name, then folder path —
+    # resolved by printf below (SC2059 pattern). FAZ 9 V-4: name + path.
     # shellcheck disable=SC2059
-    printf "$(_q_msg bridge_companion)\n" "$_q_cname"
+    printf "$(_q_msg bridge_companion)\n" "$_q_cn_eff" "$_q_cname"
     printf '%s\n' "$(_q_msg bridge_append)"
     # FAZ 8 (Y-6): the memory protocol is DATA (i18n), never code-embedded.
     printf '%s\n' "$(_q_msg bridge_reflect)"

@@ -36,6 +36,8 @@ doc_summary=summary: %d ok, %d warn, %d fail
 doc_layout_mismatch=layout/emoji.txt and layout/plain.txt slug sets differ
 doc_layout=layout
 doc_layout_missing=config has no layout= value (run: quipu init)
+doc_identity=identity
+doc_identity_missing=config has no user=/companion= value (run: quipu init --user NAME --companion NAME)
 doc_companion_missing=companion.md missing (run: quipu init)
 doc_onedrive_vault=vault path contains OneDrive (emoji folder risk, PLAN 4.9)
 doc_hooks_installed=installed
@@ -56,6 +58,9 @@ init_layout=layout: %s
 init_companion=companion.md seeded
 err_layout_conflict=layout conflict: --plain was requested but config says emoji
 err_layout_unknown=unknown layout value in config
+# persona
+persona_default_companion=Companion
+persona_default_user=User
 # context
 ctx_activity=recent activity
 ctx_threads=threads
@@ -74,7 +79,7 @@ digest_files=Touched files (top %d):
 # bridge
 bridge_run=Run: quipu context
 bridge_layout=Layout:
-bridge_companion=Companion persona: %s/companion.md
+bridge_companion=Companion persona: %s (%s/companion.md)
 bridge_append=Append-only: quipu never rewrites these files.
 bridge_reflect=Session end protocol: fill the reflection block in today's session file, update Threads.md, and append new lines to the vault folders. quipu never rewrites these texts.
 bridge_claude=See AGENTS.md for vault layout and rules.
