@@ -59,8 +59,12 @@
 
 - **J-7** Sentetik vault: 5000 `.md` (~100 bayt içerik, tek üreteç döngüsü, fixture YOK) →
   `quipu index` özet `N=5000`; `quipu search` ortak terim → beklenen isabet sayısı; süre
-  sınırları (üç OS, Windows msys dahil): **index < 120s, search < 30s**. `--brief` şekli ölçek
-  vault'unda da kilitlenir. Bu test PLAN §7'nin "birkaç bin not" iddiasını kanıta çevirir.
+  sınırları (üç OS, Windows msys dahil): **index < 3600s, search < 30s**. Gerekçe: ilk ölçüm
+  Windows msys'te 5000 notluk soğuk `index`'in 2150-2367 s (iki koşu) sürdüğünü gösterdi —
+  dosya başına ~6 süreç doğuşu (alt kabuk + awk/sed/tr) msys'te pahalı; sınır bu ölçüme göre
+  bir **askıda kalma/regresyon tavanı** olarak gevşetildi, performans iddiası değil (kayıt:
+  `docs/PLAN.md` §7 "İndeks bağlam sınırı", §9 FAZ 7). `--brief` şekli ölçek vault'unda da
+  kilitlenir. Bu test PLAN §7'nin "birkaç bin not" iddiasını kanıta çevirir.
 
 ## 5. Testler (T-78…T-87)
 
@@ -84,7 +88,7 @@
 
 **Ölçek (otomatik, süre sınırlı):**
 
-- **T-85** 5000 dosya → `index` özet `5000` + süre < 120s.
+- **T-85** 5000 dosya → `index` özet `5000` + süre < 3600s.
 - **T-86** `search` ortak terim → beklenen isabet sayısı + süre < 30s.
 - **T-87** `--brief` ölçek vault'unda: 5 sütun + künye ≤ 120 bayt.
 

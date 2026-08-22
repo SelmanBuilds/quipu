@@ -69,8 +69,9 @@
     `companion=` satırlarının bulunduğunu doğrula.
   - **Faz 4 — Ajan bağlama.** Kullanıcının ajanına göre dallanır: Claude Code → README
     §"Claude Code"daki `settings.json` hook'ları (dördü) + **yeniden başlat** uyarısı;
-    Codex → `adapters/codex/hooks.json` kopyalama + yeniden başlat; hook'suz ajan →
-    `capture --git` + `remember` + `context --bridge` üçlüsü.
+    Codex → `adapters/codex/hooks.json` kopyalama + yeniden başlat; hook'suz ajan → runbook'un
+    kendi elle döngüsü (`remember` + `context --bridge`) + README §"Hook-less agents"e
+    yönlendirme. Runbook metni `capture` komutunu **adlandırmaz** (bkz. karar notu altta).
   - **Faz 5 — İlk indeks ve doğrulama.** `quipu index` (soğuk vault uzun sürebilir — ölçüm:
     5000 not 2150-2367 s Windows msys), bir `quipu search` denemesi, `quipu doctor` tekrar,
     sonra kullanıcının dilinde rapor: ne kuruldu, ilk çalıştırma nasıl, "sihri göster" adımı
@@ -78,6 +79,19 @@
 
   Runbook **hiçbir yerde** `brew`, `python3`, `osacompile`, `swift`, `apt`, `winget`
   çağırmaz — statik testle kilitlenir (T-119).
+
+  > **Karar (2026-08-22, T-120 ile uyum):** bu maddenin ilk hâli hook'suz fallback'i
+  > `capture --git + remember + context --bridge` üçlüsü olarak anlatıyordu; bu,
+  > `tests/run.sh`'teki T-120'nin dördüncü iddiasıyla çelişiyordu — o iddia
+  > `docs/KURULUM.md`'de `capture` kelimesinin hiç geçmemesini şart koşar
+  > (`grep -qw capture` boş dönmeli). **Karar: test haklı, düzeltilen spec metnidir.**
+  > Gerekçe: `capture` hook tarafından otomatik çalıştırılan bir komuttur; runbook bir
+  > ajana onu elle çağırmayı **öğretmemeli** — T-120'nin yasağı bu tasarım niyetini
+  > kodluyor. `capture --git`'in kendisi kapsam dışı değil, sadece bu runbook'un işi
+  > değil: nerede belgelendiği zaten sabit — README "Hook-less agents" bölümü
+  > (`README.md:229`). `docs/KURULUM.md` zaten T-120'yi esas alarak yazıldı (Faz 4'te
+  > yalnız `remember`/`context --bridge`'i adlandırıp git-diff kısmı için README'ye
+  > yönlendiriyor); bu düzeltme spec metnini ona uydurur. Yeniden tartışmaya gerek yok.
 
 ## 3. Kimlik verisi (V-2…V-5)
 
