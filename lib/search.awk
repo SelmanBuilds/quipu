@@ -16,8 +16,7 @@
 #          A field no longer than `snip` is emitted whole. The snippet
 #          carries no marker and no ellipsis, and the cut uses only
 #          substr()/length()/index() — no regex, no gsub — so the PLAN 4.11
-#          no-literal-backslash contract still holds. Without brief the
-#          4-column row is emitted byte-for-byte as before.
+#          no-literal-backslash contract still holds.
 #
 #          `snip` unit caveat: length()/substr() count CHARACTERS in gawk but
 #          BYTES in mawk/BWK awk, so `snip` is a byte budget only where the
@@ -26,6 +25,29 @@
 #          window with no space in it can be cut mid-character on byte-based
 #          awks. Accepted limitation (FAZ 7 L-5), not a correctness bug: the
 #          snippet is a display hint, never a key or a matching input.
+#
+#          Row safety (V1-DUZELTME): every printed field (title, tags, and the
+#          brief snippet) is passed through scrub() first, which turns any
+#          embedded TAB/CR/LF into a space. title/tags are RAW columns (never
+#          folded/squeezed) and the snippet is a substr() of the folded field,
+#          so nothing upstream guarantees either is single-line — a heading
+#          with a literal tab, CRLF content that leaked a stray CR into a
+#          field (see lib/index.awk collect_tags()), or a byte-based
+#          substr()/length() edge case on a non-gawk awk can otherwise turn
+#          one logical row into more than one physical output line or shift
+#          it off the 4/5-column contract. Motivating evidence: CI run
+#          32576726590 (commit d955757) failed "scale: --brief rows have 5
+#          fields" and "...honours --limit 50" (got 52) on ubuntu-latest and
+#          macos-latest only — the SAME run's non-brief "returns all 5000
+#          hits" passed at an exact 5000/5000, ruling out a matching/count bug
+#          and isolating the failure to the brief-only path (the added
+#          snippet column), on the two platforms whose default `awk` is not
+#          gawk (mawk / BWK awk) vs. windows-latest (gawk via Git Bash, which
+#          passed). The exact byte-level mechanism on mawk/BWK awk was not
+#          directly observed (unavailable to reproduce against here — see the
+#          CRLF-tag regression test in tests/run.sh for what WAS confirmed).
+#          scrub() is the single choke point that makes the row shape a
+#          guarantee instead of an assumption, regardless of that mechanism.
 #
 # Contract (PLAN 4.11): no literal backslash; no regex beyond split()/index()
 # (both take plain string separators). Word matching pads each field with
@@ -42,6 +64,8 @@
 
 BEGIN {
   TAB = sprintf("%c", 9)
+  LF  = sprintf("%c", 10)
+  CR  = sprintf("%c", 13)
   FS  = TAB
   OFS = TAB
   k1 = 1.2
@@ -127,9 +151,9 @@ END {
     }
     if (matched) {
       if (brief + 0) {
-        printf "%.3f%c%s%c%s%c%s%c%s%c", score, 9, path[d], 9, title[d], 9, tags[d], 9, snippet(folded[d], snip), 10
+        printf "%.3f%c%s%c%s%c%s%c%s%c", score, 9, path[d], 9, scrub(title[d]), 9, scrub(tags[d]), 9, scrub(snippet(folded[d], snip)), 10
       } else {
-        printf "%.3f%c%s%c%s%c%s%c", score, 9, path[d], 9, title[d], 9, tags[d], 10
+        printf "%.3f%c%s%c%s%c%s%c", score, 9, path[d], 9, scrub(title[d]), 9, scrub(tags[d]), 10
       }
     }
   }
@@ -146,6 +170,25 @@ function count_occ(s, needle,   pos, cnt, len, rest) {
     pos = index(rest, needle)
   }
   return cnt
+}
+
+# Output-row safety net: a --brief (and plain) row is a TAB-joined, single-line
+# contract (path/title/tags/snippet). title/tags come from the RAW index.tsv
+# columns and are never folded, so nothing upstream guarantees they are
+# TAB/CR/LF-free (a heading with a literal tab, a stray CR from CRLF content,
+# or an implementation quirk in a non-gawk substr()/length() feeding snippet()
+# a byte that was never in the source text). scrub() is the single choke point
+# before printf: any TAB/CR/LF in a printed field becomes a space, so the row
+# can never gain a TAB-column or split across physical lines regardless of
+# what produced the offending byte. substr()/length() only (PLAN 4.11).
+function scrub(s,   i, c, out) {
+  out = ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (c == TAB || c == LF || c == CR) c = " "
+    out = out c
+  }
+  return out
 }
 
 # First `max` bytes of s, trimmed back to the last space inside the window so

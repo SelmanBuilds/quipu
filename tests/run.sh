@@ -1142,6 +1142,60 @@ t; QUIPU_VAULT="$TMP/vbrief" QUIPU_LANG=en sh "$ROOT/quipu" search alpha --brief
 assert_eq "search --brief --paths exits 2" '2' "$RC"
 t; assert_eq "search --brief --paths reports the conflict" "$(i18n err_conflict)" "$(cat "$TMP/vbrief-conf.err")"
 
+# ---- V1-DUZELTME: CRLF-authored tag stays CR-free (--brief row safety) ----
+#
+# CI run 32576726590 (commit d955757, ubuntu-latest + macos-latest only;
+# windows-latest passed) failed "scale: --brief rows have 5 fields" and
+# "scale: --brief honours --limit 50 at scale" (expected 50, got 52). The
+# SAME run's non-brief "scale: search returns all 5000 hits" (T-86) passed at
+# an exact 5000/5000, which rules out a matching/count bug in path/title/tags
+# and isolates the failure to the brief-only path (the extra snippet
+# column). A later run (32578854473, commit fdf1218) reproduced the identical
+# split ubuntu+macos fail / windows pass, confirming it tracks the AWK
+# implementation (mawk on ubuntu, BWK awk on macOS; gawk ships with Git Bash
+# on windows-latest), not the OS by itself.
+#
+# Investigation found a real, implementation-sensitive gap upstream of
+# search.awk: lib/index.awk's trim_() strips CR from a title (gsub(CR, "",
+# s)), but collect_tags() — used for BOTH frontmatter "tags:" values and body
+# "#hashtag" scanning — never did. A CRLF-authored note hands collect_tags a
+# $0 with a trailing \r still attached (only \n is a record separator to
+# awk); when that \r lands on a line's LAST token (e.g. a trailing "#tag"),
+# whether it survives split(s, parts, " ") depends on whether that specific
+# awk's whitespace-splitting treats \r as blank. gawk does, which quietly
+# masked the gap here (verified locally: this exact CRLF fixture round-trips
+# clean under gawk even without the fix below) — nothing guarantees mawk or
+# BWK awk do too. lib/index.awk's collect_tags() now strips CR itself
+# (gsub(CR, "", s) before squish_brackets/split), independent of whichever
+# awk's split(" ") happens to treat as whitespace. lib/search.awk additionally
+# gained a scrub() choke point (title/tags/snippet all pass through it before
+# printf) as defense in depth: whatever the exact byte-level mechanism behind
+# the ubuntu/macos --brief split turns out to be, no field reaching that
+# printf can carry a raw TAB/CR/LF into the emitted row.
+#
+# NOT independently reproduced at 5000-doc scale here: real `quipu index`
+# costs ~6 subprocess spawns per stale file, and this environment measured
+# ~3.7s/file (vs. 27s TOTAL for all 5000 files on ubuntu-latest CI) — a real
+# 5000-doc index would run for hours, not the ~40 minutes the scale test
+# already costs on a normal Linux runner, so it was not attempted here. This
+# fixture instead pins the ONE gap identified by static+dynamic (gawk)
+# investigation: it would have failed before the collect_tags() fix (an
+# unfixed run leaves the \r on the tag, so index.tsv's tags column and its
+# length() both come out dirty) and passes after it, on the only awk (gawk)
+# available in this environment.
+mkdir -p "$TMP/vcrlf/.quipu"
+printf 'fold=default\nlang=en\n' > "$TMP/vcrlf/.quipu/config"
+CRB=$(printf '\r')
+printf '# crlf note%s\n%s\nortakterim body #tag1 #tag2%s\n' "$CRB" "$CRB" "$CRB" > "$TMP/vcrlf/crlf-doc.md"
+QUIPU_VAULT="$TMP/vcrlf" sh "$ROOT/quipu" index >/dev/null 2>&1
+t; assert_eq "index: CRLF-authored tag has no embedded CR" '9' \
+  "$(awk -F"$TAB" '$1 == "crlf-doc.md" { print length($3) }' "$TMP/vcrlf/.quipu/index.tsv")"
+t; assert_eq "index: CRLF-authored tag value is exactly tag1,tag2" 'tag1,tag2' \
+  "$(awk -F"$TAB" '$1 == "crlf-doc.md" { print $3 }' "$TMP/vcrlf/.quipu/index.tsv")"
+BRIEFCRLF=$(QUIPU_VAULT="$TMP/vcrlf" QUIPU_LANG=en sh "$ROOT/quipu" search ortakterim --brief)
+t; assert_eq "search --brief: CRLF-doc row is one line with 5 fields" 'yes' \
+  "$(printf '%s\n' "$BRIEFCRLF" | awk -F"$TAB" '{n++; if (NF != 5) bad=1} END{print (n == 1 && bad != 1) ? "yes" : "no"}')"
+
 # ---- FAZ 7: scale, 5000 docs (T-85..T-87) ----
 
 # J-7 turns the "5000 notes" claim into a measurement instead of a sentence in
@@ -1466,8 +1520,13 @@ t; assert_eq "reflect: no python3, stat count pinned" '6 0' \
 # ---- FAZ 9: identity + personalized seed + runbook gates (T-110..T-120) ----
 
 # T-110 (V-2): init --user Ada --companion Kuz -> config user=/companion=.
-mkrem v110
-QUIPU_VAULT="$TMP/v110" QUIPU_LANG=en sh "$ROOT/quipu" init --user Ada --companion Kuz >/dev/null 2>&1
+# --plain rides along on this SAME call so it is the vault's first-ever init:
+# an unnamed init first (e.g. via mkrem, as this used to do) would seed
+# companion.md with neutral defaults, and the only-if-missing guard
+# (quipu:679) then skips personalization on the named init that follows,
+# starving T-112 of the names it checks for. --plain also pins layout=plain
+# in one shot, which CN110=$(comp_name plain) below depends on.
+QUIPU_VAULT="$TMP/v110" QUIPU_LANG=en sh "$ROOT/quipu" init --plain --user Ada --companion Kuz >/dev/null 2>&1
 t; assert_eq "identity: config has user and companion lines" 'yes' \
   "$(grep -q '^user=Ada$' "$TMP/v110/.quipu/config" \
      && grep -q '^companion=Kuz$' "$TMP/v110/.quipu/config" && printf yes || printf no)"

@@ -105,7 +105,20 @@ function squish_brackets(s,   i, c, out) {
 }
 
 # Collect "#word" tags and bare comma/space separated frontmatter values.
+#
+# CRLF note (V1-DUZELTME): trim_() strips CR for titles, but a tag scanned
+# here never went through trim_ — squish_brackets()/strip_punct() only touch
+# ',' '[' ']' and end-of-word punctuation, never CR. A CRLF-authored note
+# hands $0 to collect_tags with a trailing \r still attached (only \n is a
+# record separator to awk), and if that \r lands on the LAST token of the
+# line (e.g. a trailing "#tag"), it rides along past split(" ") on any awk
+# whose whitespace-splitting doesn't treat \r as blank, straight into the
+# stored tag value and from there into index.tsv and search output. gawk's
+# split(" ") happens to also drop \r as whitespace, which quietly masks the
+# gap there but not on every awk. Strip it explicitly so the tag is clean
+# regardless of implementation.
 function collect_tags(s,   n, i, w, parts) {
+  gsub(CR, "", s)
   s = squish_brackets(s)
   n = split(s, parts, " ")
   for (i = 1; i <= n; i++) {
