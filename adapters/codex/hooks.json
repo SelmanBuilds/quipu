@@ -22,9 +22,9 @@
     ],
     "SessionEnd": [
       { "hooks": [ { "type": "command",
-                     "command": "QUIPU_HOOK=1 quipu remember",
-                     "commandWindows": "set QUIPU_HOOK=1&& quipu remember",
-                     "timeout": 3 } ] }
+                     "command": "QUIPU_HOOK=1 quipu remember && QUIPU_HOOK=1 quipu index",
+                     "commandWindows": "set QUIPU_HOOK=1&& quipu remember&& set QUIPU_HOOK=1&& quipu index",
+                     "timeout": 30 } ] }
     ]
   }
 }

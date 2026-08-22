@@ -63,6 +63,26 @@ _q_lang() {
   printf '%s\n' "$_q_l"
 }
 
+_q_fold_prof() {
+  # V1-DUZELTME R-4: SINGLE source of the fold profile. Chain:
+  # vault config fold= -> language tr -> tr -> default. `index` and `search`
+  # both call this; leaving the chain duplicated in two commands was the
+  # cause of the mixed-index corruption (P-2/P-3).
+  _q_fp_v=$1
+  _q_fp=
+  if [ -n "$_q_fp_v" ] && [ -f "$_q_fp_v/.quipu/config" ]; then
+    _q_fp=$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_fp_v/.quipu/config" 2>/dev/null || true)
+  fi
+  if [ -z "$_q_fp" ]; then
+    if [ "$(_q_lang)" = tr ]; then
+      _q_fp='tr'
+    else
+      _q_fp=default
+    fi
+  fi
+  printf '%s\n' "$_q_fp"
+}
+
 _q_msg() {
   # Look up a key in the active language file; fall back to en, then the key.
   _q_l=$(_q_lang)
@@ -252,6 +272,21 @@ _q_doctor() {
       _q_line warn "$(_q_msg doc_layout)" "$(_q_msg doc_layout_missing)"
     else
       _q_line ok "$(_q_msg doc_layout)" "$_q_lay"
+    fi
+    # Fold profile (V1-DUZELTME R-3): absent -> warn (exit stays 0); present
+    # but no matching fold/<value>.sed -> fail. Mirror of the layout pattern
+    # above, except an unknown value is fatal: index and search would both
+    # break on a sed script that does not exist.
+    _q_fpr=
+    if [ -f "$_q_v/.quipu/config" ]; then
+      _q_fpr=$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
+    fi
+    if [ -z "$_q_fpr" ]; then
+      _q_line warn "$(_q_msg doc_fold)" "$(_q_msg doc_fold_missing)"
+    elif [ -f "$_q_HOME/fold/$_q_fpr.sed" ]; then
+      _q_line ok "$(_q_msg doc_fold)" "$_q_fpr"
+    else
+      _q_line fail "$(_q_msg doc_fold)" "$(_q_msg doc_fold_unknown)"
     fi
     # FAZ 9 V-5: identity — user= or companion= absent -> warn (exit stays 0).
     # Mirror of the doc_layout_missing pattern above.
@@ -554,6 +589,21 @@ _q_cmd_init() {
     else
       printf 'lang=%s\n' "$_q_lang" >> "$_q_v/.quipu/config"
     fi
+    _q_changed=1
+  fi
+
+  # Fold profile (V1-DUZELTME R-1/R-2): derived ONCE and pinned to the config.
+  # Written only when the line is absent — an existing fold= is NEVER
+  # overwritten, unlike lang= above. Rationale: changing the profile
+  # invalidates the whole index, and the user may have hand-written a value
+  # (e.g. fold=latin). To change it: edit the config, then run `index --full`.
+  if ! grep -q '^fold=' "$_q_v/.quipu/config"; then
+    if [ "$(_q_lang)" = tr ]; then
+      _q_fold='tr'
+    else
+      _q_fold=default
+    fi
+    printf 'fold=%s\n' "$_q_fold" >> "$_q_v/.quipu/config"
     _q_changed=1
   fi
 
@@ -1091,17 +1141,8 @@ _q_cmd_index() {
     _q_die err_no_vault
   fi
 
-  _q_prof=
-  if [ -f "$_q_v/.quipu/config" ]; then
-    _q_prof=$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
-  fi
-  if [ -z "$_q_prof" ]; then
-    if [ "$(_q_lang)" = tr ]; then
-      _q_prof='tr'
-    else
-      _q_prof=default
-    fi
-  fi
+  # V1-DUZELTME R-4: profile comes from the single helper, not a local copy.
+  _q_prof=$(_q_fold_prof "$_q_v")
 
   _q_tmp=$(mktemp -d "${TMPDIR:-/tmp}/quipu-index-XXXXXX") || exit 1
   trap 'rm -rf "$_q_tmp"' EXIT HUP INT TERM
@@ -1155,6 +1196,12 @@ _q_cmd_index() {
   N=$((R + S))
   mv "$_q_tmp/idx.tmp" "$_q_v/.quipu/index.tsv"
 
+  # V1-DUZELTME R-6: on the hook path stdout stays empty (FAZ 5 H-7 rule,
+  # now applied to `index` too — adapters run it on SessionEnd).
+  if [ "${QUIPU_HOOK:-0}" = 1 ]; then
+    return 0
+  fi
+
   _q_fmt=$(_q_msg idx_summary)
   # shellcheck disable=SC2059
   printf "$_q_fmt" "$N" "$R" "$S" "$D"
@@ -1191,19 +1238,8 @@ _q_cmd_search() {
 
   _q_v=$(_q_vault)
 
-  # Fold profile: config fold= -> language tr -> tr -> default (same chain
-  # and same fallback as `quipu index`).
-  _q_prof=
-  if [ -n "$_q_v" ] && [ -f "$_q_v/.quipu/config" ]; then
-    _q_prof=$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$_q_v/.quipu/config" 2>/dev/null || true)
-  fi
-  if [ -z "$_q_prof" ]; then
-    if [ "$(_q_lang)" = tr ]; then
-      _q_prof='tr'
-    else
-      _q_prof=default
-    fi
-  fi
+  # V1-DUZELTME R-4: same single helper as `quipu index` (was a copy, P-2).
+  _q_prof=$(_q_fold_prof "$_q_v")
 
   # Fold the query with the same profile and order as the index (PLAN 4.3):
   # sed -f fold/PROFIL.sed, THEN tr 'A-Z' 'a-z'. SC2018/SC2019 suggest

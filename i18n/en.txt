@@ -36,6 +36,9 @@ doc_summary=summary: %d ok, %d warn, %d fail
 doc_layout_mismatch=layout/emoji.txt and layout/plain.txt slug sets differ
 doc_layout=layout
 doc_layout_missing=config has no layout= value (run: quipu init)
+doc_fold=fold profile
+doc_fold_missing=config has no fold= value (run: quipu init)
+doc_fold_unknown=config fold= names a profile with no fold/<value>.sed
 doc_identity=identity
 doc_identity_missing=config has no user=/companion= value (run: quipu init --user NAME --companion NAME)
 doc_companion_missing=companion.md missing (run: quipu init)

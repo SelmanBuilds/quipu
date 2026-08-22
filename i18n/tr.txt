@@ -36,6 +36,9 @@ doc_summary=özet: %d ok, %d uyarı, %d hata
 doc_layout_mismatch=layout/emoji.txt ve layout/plain.txt slug kümeleri farklı
 doc_layout=yerleşim
 doc_layout_missing=config'te layout= değeri yok (çalıştır: quipu init)
+doc_fold=katlama profili
+doc_fold_missing=config'te fold= değeri yok (çalıştır: quipu init)
+doc_fold_unknown=config'teki fold= değerinin fold/<değer>.sed karşılığı yok
 doc_identity=kimlik
 doc_identity_missing=config'te user=/companion= değeri yok (çalıştır: quipu init --user AD --companion AD)
 doc_companion_missing=companion.md yok (çalıştır: quipu init)
