@@ -958,11 +958,13 @@ t; assert_eq "block.awk: default markers exact text" 'yes' \
 # T-72 (I-2): the whole chain in one vault — init -> flag-mode capture -> index
 # -> search. Each step's exit code is asserted on its own (SPEC 3, T-72), so a
 # regression is pinned to one link instead of surfacing only at the last hop.
-# `init` writes layout=emoji + lang=tr but no fold= line, so the folding profile
-# is nailed down explicitly; QUIPU_LANG=en keeps every message ASCII-stable.
-t; QUIPU_VAULT="$TMP/vchain" QUIPU_LANG=en sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1; RC=$?
+# `init` now pins fold=tr itself (V1-DUZELTME R-1), so no manual config patch
+# is needed (P-6). QUIPU_LANG is deliberately NOT set on this init call: it
+# would outrank the just-written config lang=tr in the _q_lang chain and pin
+# fold=default instead (`init --lang tr` alone is enough; only the message
+# text of the LATER commands needs QUIPU_LANG=en for ASCII stability).
+t; QUIPU_VAULT="$TMP/vchain" sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1; RC=$?
 assert_eq "chain: init exits 0" '0' "$RC"
-printf 'fold=tr\n' >> "$TMP/vchain/.quipu/config"
 printf '# Notlar\n\nAlpha zincir notu.\n' > "$TMP/vchain/note.md"
 
 # Flag-mode capture needs no JSON fixture (G-4) — the chain stays hermetic.
@@ -979,9 +981,9 @@ assert_eq "chain: search returns the captured note" 'note.md' "$CHAIN_HIT"
 # T-73 (I-3): the Turkish form of the same chain. The note says "İstanbul ışık";
 # indexing folds it, so the lowercase query hits, and the dotted-capital query
 # must return the byte-identical result set — index folding == query folding all
-# the way along the chain (SPEC 4.2 in chain form).
-QUIPU_VAULT="$TMP/vchaintr" QUIPU_LANG=en sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1
-printf 'fold=tr\n' >> "$TMP/vchaintr/.quipu/config"
+# the way along the chain (SPEC 4.2 in chain form). `init` pins fold=tr itself
+# (R-1); QUIPU_LANG is withheld on this call for the same reason as T-72 (P-6).
+QUIPU_VAULT="$TMP/vchaintr" sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1
 printf '# Işık\n\nİstanbul ışık deneyleri burada.\n' > "$TMP/vchaintr/istanbul.md"
 QUIPU_VAULT="$TMP/vchaintr" QUIPU_LANG=en sh "$ROOT/quipu" capture --event PostToolUse --tool Write --path istanbul.md >/dev/null 2>&1
 QUIPU_VAULT="$TMP/vchaintr" QUIPU_LANG=en sh "$ROOT/quipu" index >/dev/null 2>&1
@@ -1020,12 +1022,12 @@ t; assert_eq "index: one touched file leaves stale 1, reused 2" '3 2 1 0' "$(idx
 # capture --git -> index -> search hit -> remember --git (which commits by
 # itself) -> commit leftovers -> capture --git again. The core claim is the last
 # one: the commit consumed the diff, so no second gitdiff line appears (H-9
-# honesty proven end to end). `init` writes no fold= line, so the profile is
-# pinned explicitly. gitdiff lines are counted with awk index() rather than
-# grep, keeping the pattern policy uniform (PLAN 4.3).
+# honesty proven end to end). `init` pins fold=tr itself (R-1); QUIPU_LANG is
+# withheld on this call for the same reason as T-72/T-73 (P-6). gitdiff lines
+# are counted with awk index() rather than grep, keeping the pattern policy
+# uniform (PLAN 4.3).
 mkdir -p "$TMP/vgitchain"
-QUIPU_VAULT="$TMP/vgitchain" QUIPU_LANG=en sh "$ROOT/quipu" init --git --lang tr >/dev/null 2>&1
-printf 'fold=tr\n' >> "$TMP/vgitchain/.quipu/config"
+QUIPU_VAULT="$TMP/vgitchain" sh "$ROOT/quipu" init --git --lang tr >/dev/null 2>&1
 git_commit vgitchain init
 printf 'Alpha git zinciri notu.\n' > "$TMP/vgitchain/note.md"
 
@@ -1187,6 +1189,110 @@ QUIPU_VAULT="$TMP/vscale" QUIPU_LANG=en sh "$ROOT/quipu" search ortakterim --lim
 t; assert_eq "scale: --brief rows have 5 fields" 'yes' "$(awk -F"$TAB" '{if (NF != 5) bad++} END{print (bad ? "no" : "yes")}' "$TMP/vscale-brief.out")"
 t; assert_eq "scale: --brief snippet is at most 120 bytes" 'yes' "$(awk -F"$TAB" '{if (length($5) > 120) bad++} END{print (bad ? "no" : "yes")}' "$TMP/vscale-brief.out")"
 t; assert_eq "scale: --brief honours --limit 50 at scale" '50' "$(awk 'END{print NR}' "$TMP/vscale-brief.out")"
+
+# ---- V1-DUZELTME: fold profile pinning + index self-refresh (T-88..T-95) ----
+
+# T-88 (R-1): `init --lang tr` pins fold=tr; `init` with no --lang flag under
+# LC_ALL=C pins fold=default. QUIPU_LANG must stay unset on these calls — see
+# the P-6 note on T-72 above: it would outrank the config lang= just written
+# and corrupt the derivation.
+t; QUIPU_VAULT="$TMP/vt88tr" sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1; RC=$?
+assert_eq "T-88: init --lang tr exits 0" '0' "$RC"
+t; assert_eq "T-88: init --lang tr pins fold=tr" 'tr' \
+  "$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$TMP/vt88tr/.quipu/config")"
+
+t; QUIPU_VAULT="$TMP/vt88def" LC_ALL=C sh "$ROOT/quipu" init >/dev/null 2>&1; RC=$?
+assert_eq "T-88: init without --lang exits 0" '0' "$RC"
+t; assert_eq "T-88: init without --lang under LC_ALL=C pins fold=default" 'default' \
+  "$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$TMP/vt88def/.quipu/config")"
+
+# T-89 (R-2): a second `init --lang en` updates lang= but never touches an
+# already-pinned fold=.
+t; QUIPU_VAULT="$TMP/vt89" sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1; RC=$?
+assert_eq "T-89: first init --lang tr exits 0" '0' "$RC"
+t; QUIPU_VAULT="$TMP/vt89" sh "$ROOT/quipu" init --lang en >/dev/null 2>&1; RC=$?
+assert_eq "T-89: second init --lang en exits 0" '0' "$RC"
+t; assert_eq "T-89: second init updates lang=en" 'en' \
+  "$(awk -F= -v k=lang '$1==k{sub(/^[^=]*=/,"");print;exit}' "$TMP/vt89/.quipu/config")"
+t; assert_eq "T-89: fold=tr survives the second init" 'tr' \
+  "$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$TMP/vt89/.quipu/config")"
+
+# T-90 (R-2): a hand-written fold= is never overwritten by `init`, known or
+# unknown profile alike.
+mkdir -p "$TMP/vt90/.quipu"
+printf 'fold=latin\n' > "$TMP/vt90/.quipu/config"
+t; QUIPU_VAULT="$TMP/vt90" sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1; RC=$?
+assert_eq "T-90: init over a hand-written fold= exits 0" '0' "$RC"
+t; assert_eq "T-90: init never overwrites a hand-written fold=" 'latin' \
+  "$(awk -F= -v k=fold '$1==k{sub(/^[^=]*=/,"");print;exit}' "$TMP/vt90/.quipu/config")"
+
+# T-91 (P-3 regression): the exact live scenario from V1-DUZELTME-BULGULAR.md.
+# init --lang tr -> note -> index -> a SECOND note added and indexed under
+# QUIPU_LANG=en. Before R-1/R-4 the second note's folded field kept its raw
+# Turkish diacritics (a different profile than the first note) and was
+# unreachable by any query; now both rows fold with the SAME pinned profile.
+t; QUIPU_VAULT="$TMP/vt91" sh "$ROOT/quipu" init --lang tr >/dev/null 2>&1; RC=$?
+assert_eq "T-91: init --lang tr exits 0" '0' "$RC"
+printf '# dpi\n\nİkinci monitörde taşbar taşması.\n' > "$TMP/vt91/dpi.md"
+t; QUIPU_VAULT="$TMP/vt91" QUIPU_LANG=en sh "$ROOT/quipu" index >/dev/null 2>&1; RC=$?
+assert_eq "T-91: first index exits 0" '0' "$RC"
+
+printf '# dpi2\n\nÜçüncü monitörde ölçek sorunu.\n' > "$TMP/vt91/dpi2.md"
+t; QUIPU_VAULT="$TMP/vt91" QUIPU_LANG=en sh "$ROOT/quipu" index >/dev/null 2>&1; RC=$?
+assert_eq "T-91: second index (QUIPU_LANG=en) exits 0" '0' "$RC"
+
+t; assert_eq "T-91: no raw Turkish letter survives in any folded column" 'yes' \
+  "$(awk -F"$TAB" '{if ($5 ~ /[ışİÜüÖö]/) bad++} END{print (bad ? "no" : "yes")}' "$TMP/vt91/.quipu/index.tsv")"
+t; assert_eq "T-91: QUIPU_LANG=en search monitor finds both notes" '2' \
+  "$(QUIPU_VAULT="$TMP/vt91" QUIPU_LANG=en sh "$ROOT/quipu" search monitor | awk 'END{print NR}')"
+
+# T-92 (R-3): doctor's fold check — absent fold= warns (exit stays 0), an
+# unknown profile fails (exit 1). doc_summary's last number is read back
+# language-independently, same technique as idx_nums above.
+mkdir -p "$TMP/vt92a/.quipu"
+printf 'layout=emoji\nlang=en\n' > "$TMP/vt92a/.quipu/config"
+t; QUIPU_VAULT="$TMP/vt92a" QUIPU_LANG=en sh "$ROOT/quipu" doctor >"$TMP/vt92a.out" 2>&1; RC=$?
+assert_eq "T-92: doctor with no fold= exits 0" '0' "$RC"
+t; assert_eq "T-92: doctor with no fold= warns" 'yes' \
+  "$(awk -F"$TAB" '$2=="fold profile" && $1=="warn" {f=1} END{exit !f}' "$TMP/vt92a.out" && printf yes || printf no)"
+
+mkdir -p "$TMP/vt92b/.quipu"
+printf 'layout=emoji\nlang=en\nfold=yokboyleprofil\n' > "$TMP/vt92b/.quipu/config"
+t; QUIPU_VAULT="$TMP/vt92b" QUIPU_LANG=en sh "$ROOT/quipu" doctor >"$TMP/vt92b.out" 2>&1; RC=$?
+assert_eq "T-92: doctor with unknown fold= exits 1" '1' "$RC"
+t; assert_eq "T-92: doc_summary's last field (fail count) is 1" '1' \
+  "$(awk '/^summary:/{ gsub(/[^0-9]/," "); s=""; for (i=1;i<=NF;i++) if ($i!="") s=s (s==""?"":" ") $i; n=split(s,a," "); print a[n] }' "$TMP/vt92b.out")"
+
+# T-93 (R-4): `_q_fold_prof` is the single source for both index and search —
+# a profile-specific fold (fold=latin: Straße -> strasse) shows up identically
+# in index.tsv column 5 and in the search hit.
+mkdir -p "$TMP/vt93/.quipu"
+printf 'fold=latin\nlang=en\n' > "$TMP/vt93/.quipu/config"
+printf '# strasse\n\nStraße Notizen hier.\n' > "$TMP/vt93/strasse.md"
+t; QUIPU_VAULT="$TMP/vt93" QUIPU_LANG=en sh "$ROOT/quipu" index >/dev/null 2>&1; RC=$?
+assert_eq "T-93: index under fold=latin exits 0" '0' "$RC"
+t; assert_eq "T-93: index.tsv column 5 folds Straße to strasse" '# strasse  strasse notizen hier.' \
+  "$(awk -F"$TAB" '$1=="strasse.md"{print $5}' "$TMP/vt93/.quipu/index.tsv")"
+t; assert_eq "T-93: search strasse hits the same latin-folded document" 'strasse.md' \
+  "$(QUIPU_VAULT="$TMP/vt93" QUIPU_LANG=en sh "$ROOT/quipu" search strasse | awk -F"$TAB" 'NR==1{print $2}')"
+
+# T-94 (R-5): adapter data, static check (T-54..T-56 pattern) — SessionEnd
+# runs `index` after `remember` in both adapters, commandWindows included.
+t; assert_eq "claude-code adapter: SessionEnd command runs index" 'yes' \
+  "$(awk '/"SessionEnd"/,/\]/' "$ROOT/adapters/claude-code.json" | grep -q '"command":.*quipu index' && printf yes || printf no)"
+t; assert_eq "codex adapter: SessionEnd command runs index" 'yes' \
+  "$(awk '/"SessionEnd"/,/\]/' "$ROOT/adapters/codex/hooks.json" | grep -q '"command":.*quipu index' && printf yes || printf no)"
+t; assert_eq "codex adapter: SessionEnd commandWindows runs index" 'yes' \
+  "$(awk '/"SessionEnd"/,/\]/' "$ROOT/adapters/codex/hooks.json" | grep -q '"commandWindows":.*quipu index' && printf yes || printf no)"
+
+# T-95 (R-6): the hook path stays silent on `index`, the same H-7 rule as the
+# other commands; the index is still written.
+mk_index_vault vt95
+t; OUT=$(QUIPU_VAULT="$TMP/vt95" QUIPU_HOOK=1 sh "$ROOT/quipu" index 2>"$TMP/vt95.err"); RC=$?
+assert_eq "T-95: QUIPU_HOOK=1 index exits 0" '0' "$RC"
+t; assert_eq "T-95: QUIPU_HOOK=1 index prints nothing to stdout" '' "$OUT"
+t; assert_eq "T-95: QUIPU_HOOK=1 index prints nothing to stderr" '' "$(cat "$TMP/vt95.err")"
+t; assert_eq "T-95: index.tsv is still written" '3' "$(awk 'END{print NR}' "$TMP/vt95/.quipu/index.tsv")"
 
 # ---- FAZ 8: reflection block + missed-reflection catcher (T-96..T-108) ----
 
