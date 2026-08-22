@@ -5,7 +5,7 @@
 > Buradaki tüm teknik bulgular **ölçülmüş ve doğrulanmıştır** — tahmin değildir.
 > Kanıtlar "Doğrulanmış Bulgular" bölümünde, yeniden üretme komutlarıyla birlikte.
 >
-> **Tarih:** 2026-08-20 · **Durum:** FAZ 4 tamam — çok-şemalı capture + Codex adaptörü (PR #5, `eb045dc`); FAZ 5 sırada (hook'suz fallback).
+> **Tarih:** 2026-08-22 · **Durum:** FAZ 7'ye kadar kod+testler yerelde tamam ve commit'li (son: FAZ6+FAZ7 `dea829c`, docs geri getirme `ecca473`) — **ama dal hiç push edilmedi**: `git branch -a` çıktısında `origin/faz6-faz7` yok, PR açılmamış, üç OS CI hiç koşmamış; iki fazın da çıkış koşulu ("Dal + PR, üç OS CI yeşil olmadan merge yok") bu yüzden **karşılanmadı** (`git tag -l` de boş, `v1.0.0` etiketi yok). FAZ 8 (yansıtıcı hafıza) kodu ve artık `docs/FAZ8-BULGULAR.md` da yazıldı (Dilim 0 çıkış koşulu karşılandı) ama diff **hâlâ commit edilmedi**. FAZ 9'un runbook'u (`docs/KURULUM.md`) da yazıldı, ama `sh tests/run.sh` yeşil doğrulanmadı ve şu haliyle **FAIL verir** — sebep içerik değil, testin kendi hatası: T-120 (`tests/run.sh:1461`) `tr '\n' ' '` ile sonda boşluk bırakıyor, `assert_eq` boşluksuz bekliyor; ayrıca T-120'nin `capture` kelimesini yasaklayan iddiası `FAZ9-SPEC.md` §2'nin hook'suz fallback anlatımıyla çelişiyor, karara bağlanmadı. `FAZ7-SPEC.md:62`'deki 120s eşiği de gerçek `tests/run.sh` sınırı 3600s ile hâlâ uyumsuz (J-7). Ayrıntı: Bölüm 6 ve 9.
 > **İsim notu:** `quipu` seçildi. Değiştirmek istersen tüm dosyada tek find/replace yeter.
 
 ---
@@ -556,7 +556,7 @@ config-only değil).
 - `quipu context --bridge` : son-oturum bağlamını AGENTS.md'deki ayrı
   `<!-- quipu:context:start/end -->` bloğuna yazar (statik `quipu:start` bloğu init'in malı kalır)
 
-### FAZ 6 — Genişletilmiş CI matrisi (entegrasyon) ✅
+### FAZ 6 — Genişletilmiş CI matrisi (entegrasyon) ◐ (kod+yerel test tamam / PR+CI eksik)
 CLI yüzeyi (Adım 3) tamamlanınca Adım 2'nin matrisi **ayrı bir matris kurmadan** büyüdü;
 aynı `[ubuntu-latest, macos-latest, windows-latest]` üzerinde uçtan uca senaryolar eklendi:
 - indeks üretimi (`quipu index` özet satırının tam şekli + artımlı sayımlar — T-74/T-75),
@@ -571,7 +571,17 @@ POSIX uyumu) tekrarlanmadı. Yeni koşucu, yeni CI işi, `ci.yml` değişikliği
 > **Bu faz projenin kendisidir, cilası değil.** avenoxbeyin bozuk yayınlandı çünkü ikinci bir
 > makinede hiç çalıştırılmadı. Bölüm 4'teki üç hatanın hepsini bu matris otomatik yakalardı.
 
-### FAZ 7 — Kapatıcı: DZ-4 + arama ölçeği + v1 ✅
+**Denetim (`docs/FAZ6-KONTROL.md`, 2026-08-22):** G-1…G-5, I-1…I-8, T-72…T-77 doğru
+uygulanmış, sözleşme ihlali yok (I-7 kısmi: PR referansı yok — tam olarak aşağıdaki
+madde yüzünden, PR hiç açılmadı).
+
+**Çıkış koşulu karşılanmadı (2026-08-22 doğrulandı):** FAZ6-SPEC'in çıkış koşulu "Dal +
+PR, üç OS CI yeşil olmadan merge yok". `dea829c` ve `ecca473` yalnız yerel `faz6-faz7`
+dalında duruyor; `git branch -a` çıktısında `origin/faz6-faz7` yok, PR açılmamış, üç OS
+CI hiç koşmamış. Kod ve testler yerelde geçiyor (bkz. Bölüm 9) ama sözleşmenin şart
+koştuğu çok-platform doğrulaması eksik — bu yüzden faz burada ✅ değil ◐ işaretlendi.
+
+### FAZ 7 — Kapatıcı: DZ-4 + arama ölçeği + v1 ◐ (kod+yerel test tamam / PR+CI eksik)
 - **DZ-4 kapandı:** `_q_die key [code [arg…]]` mesaj formatına argüman geçirir; capture / init /
   context / remember / search döngülerinde `-*) _q_die err_unknown_flag 2 "$1"` → `unknown flag:
   --nope`, exit 2. `err_missing_arg` çağrıları bit-birebir korundu (T-81 kilitler).
@@ -587,6 +597,64 @@ POSIX uyumu) tekrarlanmadı. Yeni koşucu, yeni CI işi, `ci.yml` değişikliği
   sayı her koşuda `# info:` satırıyla basılır.
 - İptaller (2026-08-21 sahip kararı): avenoxbeyin issue'su, Cursor/Windsurf/OpenCode
   adaptörleri, Codex canlı doğrulaması (adaptör kodu repo'da kalır).
+
+**Denetim (`docs/FAZ7-KONTROL.md`, 2026-08-22):** L-1…L-5, J-1…J-6, J-8, J-9, J-11 doğru
+uygulanmış; **J-7 ve J-10 kısmi** — ayrıntı `FAZ7-KONTROL.md`'de. J-7 somut sapma:
+`FAZ7-SPEC.md:62` "index < 120s" diyor ama `tests/run.sh:1173` `-lt 3600` uyguluyor.
+Sapmanın gerekçesi (ölçülen 2150-2367 s) Bölüm 7 "İndeks bağlam sınırı" satırında ve
+Bölüm 9'da var, ama `FAZ7-SPEC.md` bu güncellemede **hiç düzeltilmedi** — bkz. Bölüm 9
+Açık kalemler.
+
+**Çıkış koşulu karşılanmadı (2026-08-22 doğrulandı):** FAZ7-SPEC'in çıkış koşulu da FAZ 6
+ile aynı ("Dal + PR, üç OS CI yeşil olmadan merge yok") ve aynı sebeple karşılanmadı —
+`origin/faz6-faz7` yok, PR yok, CI koşmadı. Bkz. FAZ 6 altındaki not.
+
+### FAZ 8 — Yansıtıcı hafıza ◐ (2026-08-22, kod+bulgular tamam / commit+yeşil suite eksik)
+
+> **◐ işareti bu dosyada:** kod ve testler yazılmış ama kapanış koşulları (spec §6
+> Dilim 0) tamamlanmamış — ne "✅ tamam" ne "hiç başlanmadı", aradaki gerçek durum.
+
+Kod ve testler çalışma ağacında duruyor, **henüz commit edilmedi**:
+- Y-1: oturum dosyasına yansıma bloğu, yalnız-yoksa append (`quipu:990-1004`) —
+  `block.awk` kasıtlı kullanılmadı (blok içeriğini değiştirir, modelin yazdığını silerdi).
+- Y-2: `_q_reflect_filled()` (`quipu:160-179`) — marker aralığında awk ile doluluk
+  tespiti, `mtime` okuması yok (S-5.2).
+- Y-3: kaçırılan yansıma bayrağı `.quipu/needs_reflection`'a yazılır (`quipu:1059`),
+  bir sonraki `SessionStart`'ta okunup silinir (`quipu:843-845`, tek atış).
+- Y-4: `ctx_reflect_ask` (`quipu:867-874`) — bugünkü oturum dosyası var ve blok boşsa
+  modele doldurma isteği; `ctx_precompact` de güncellendi (`i18n/en.txt:70`).
+- Y-5: beş yeni anahtar tr+en'de, iki dosyanın anahtar kümesi birebir eşit.
+- Y-6: `bridge_reflect` i18n anahtarı AGENTS.md köprüsüne bağlandı (`quipu:677`).
+- T-96…T-108: hepsi `tests/run.sh:1191-1360` içinde yazılı.
+
+**Eksik — FAZ 8 bu yüzden hâlâ ✅ değil (2026-08-22 güncellendi):**
+- ~~`docs/FAZ8-BULGULAR.md` hiç yazılmadı~~ → ✅ **yazıldı** (194 satır) — spec §6 Dilim 0
+  çıkış koşulu (S-1…S-5 kaynaklı) artık karşılandı.
+- `sh tests/run.sh` ile yeşil doğrulama **hâlâ yapılmadı** — suite bu haliyle zaten kırık,
+  ama artık FAZ 8'in kendi hatasından değil: T-120'nin sondaki-boşluk hatası yüzünden
+  (`tests/run.sh:1461`, bkz. Bölüm 9 Açık kalemler).
+- Değişiklikler **hâlâ commit edilmedi**, çalışma ağacında duruyor.
+
+### FAZ 9 — Kurulum deneyimi ◐ (2026-08-22, kimlik dilimi+runbook tamam / test hatası+spec çelişkisi eksik)
+
+Aynı commit'lenmemiş diff'in içinde, kimlik kısmı (V-2…V-5) kodlanmış: `init
+--user/--companion`, persona `%s` doldurma, `doctor` kimlik satırı; T-110…T-118
+testleri yazıldı. `docs/FAZ9-BULGULAR.md` (185 satır) Dilim 0 bulgularını taşıyor.
+V-1 (`docs/KURULUM.md`, 146 satır, ajan runbook'u) de artık yazıldı.
+
+**Eksik (2026-08-22 güncellendi):**
+- ~~V-1 yok~~ → ✅ **yazıldı** (`docs/KURULUM.md`).
+- T-120 **kendi hatasıyla** FAIL veriyor, içerikten bağımsız: `tests/run.sh:1461`
+  `CMDS120=$(... | sort -u | tr '\n' ' ')` sonda boşluk bırakıyor, `assert_eq`'in beklediği
+  literal `'context doctor index init remember search'` boşluksuz — çıkarılan küme tam
+  doğru (`context doctor index init remember search `), yalnız sondaki boşluk yüzünden
+  eşitlik tutmuyor. `docs/KURULUM.md` ne yazarsa yazsın bu haliyle FAIL verir.
+- T-120'nin dördüncü iddiası (`tests/run.sh:1472` civarı) `KURULUM.md`'de `capture`
+  kelimesinin **hiç geçmemesini** şart koşuyor, ama `FAZ9-SPEC.md` §2 hook'suz fallback'i
+  `capture --git + remember + context --bridge` üçlüsü olarak anlatıyor. `KURULUM.md`
+  testi esas alıp yazıldı (fallback `capture` denmeden anlatıldı, git-diff kısmı için
+  README'ye yönlendirildi) — spec ile test arasındaki bu çelişki bir karar bekliyor,
+  bkz. Bölüm 9 Açık kalemler.
 
 ---
 
@@ -684,14 +752,14 @@ genelleştirmesi, `err_conflict`/`bridge_updated` i18n anahtarları); yerelde 17
 Dürüst sınırlar: git-diff durumsuz (`Read` yok, commit'siz iki koşu çoğaltır); hook'suz ajan
 davranışı `[doğrulanmadı]`.
 
-FAZ 6 ✅ (2026-08-21) — genişletilmiş CI matrisi: `init → capture → index → search` zinciri
+FAZ 6 ◐ (2026-08-21, kod+yerel test tamam / PR+CI eksik — bkz. Bölüm 6) — genişletilmiş CI matrisi: `init → capture → index → search` zinciri
 tek vault'ta, her adımın exit kodu ayrı (T-72), Türkçe katlama zincir boyunca (`istanbul` ==
 `İstanbul`, T-73), `index` özet satırının tam şekli + artımlı sayımlar (T-74/T-75), git zinciri
 `capture --git → index → search → remember --git → commit → capture --git` sonunda yeni satır
 yok (H-9, T-76), zincir vault'unda `doctor` 0 hata (T-77); `docs/FAZ6-BULGULAR.md` (G-1…G-5,
 `[kaynak: dosya:satır]` etiketli). Yeni koşucu / CI işi / `ci.yml` değişikliği yok.
 
-FAZ 7 ✅ (2026-08-21) — kapatıcı: DZ-4 kapandı (`_q_die key [code [arg…]]`, `err_unknown_flag`,
+FAZ 7 ◐ (2026-08-21, kod+yerel test tamam / PR+CI eksik — bkz. Bölüm 6) — kapatıcı: DZ-4 kapandı (`_q_die key [code [arg…]]`, `err_unknown_flag`,
 beş argüman döngüsünde `-*)` kolu; T-78…T-81), `search --brief` (5. sütun = 120 baytlık künye,
 kelime sınırında, marker yok, `--paths` ile dışlar; T-82…T-84), 5000 dokümanlık ölçek testi
 (üreteç, fixture değil; index 5000/5000 ve ortak terimde 5000 isabet; T-85…T-87),
@@ -705,26 +773,66 @@ mawk'ta bayt sayar (`fold=default` vault'ta sınır platforma bağlı).
 
 Yerleşim (2026-08-22) — vault on klasörlü avenoxbeyin taksonomisine yaklaştırıldı ve yerleşim testleri, klasör satırları ile açıklamaları `layout/*.txt` dosyalarından ve `layout_*` i18n anahtarlarından okuyan veri odaklı yapıya geçti.
 
-**Sıradaki:** v2 adayları — MCP paketi (§3), `search.awk`'ın akış tabanlı iki geçişli sürümü
-(bellek tavanı), `quipu index`'in toplu-boru hattına çevrilmesi (~2400 s'lik msys tavanının
-tek gerçek çözümü). v1 kapsamında açık kalan tek kalem: Codex canlı doğrulaması — iptal
-(2026-08-21, ChatGPT üyeliği yok), adaptör kodu repo'da kalır.
+**Açık kalemler (2026-08-22 güncellendi, öncelik sırasıyla):**
+1. `tests/run.sh:1461` — T-120'nin `tr '\n' ' '` sondaki-boşluk hatasını düzelt. İçerik
+   sorunu değil, testin kendi hatası: çıkarılan küme (`context doctor index init remember
+   search`) tam doğru, `assert_eq` boşluksuz bekliyor. Suite'i kıran, şu an bilinen tek kalem
+   bu — `docs/KURULUM.md` yazılmış olmasına rağmen bu haliyle FAIL verir.
+2. T-120 ↔ `FAZ9-SPEC.md` §2 `capture` çelişkisini karara bağla: T-120 `KURULUM.md`'de
+   `capture` kelimesinin hiç geçmemesini şart koşuyor, spec hook'suz fallback'i
+   `capture --git + remember + context --bridge` olarak anlatıyor. `KURULUM.md` testi esas
+   alıp yazıldı; ya testi ya spec'i düzelt.
+3. `sh tests/run.sh` tam koşusu — hâlâ yeşil doğrulanmadı (yukarıdaki iki kalem
+   çözülmeden koşulursa zaten FAIL verir; suite ~52 dk sürüyor).
+4. FAZ 8 + FAZ 9-kimlik değişikliklerini commit et — kod ve testler hâlâ çalışma ağacında,
+   commit edilmedi.
+5. `faz6-faz7` dalını push et + PR aç + üç OS CI koştur — `origin/faz6-faz7` yok
+   (`git branch -a` ile doğrulandı), PR açılmamış, CI hiç koşmamış; FAZ6-SPEC ve
+   FAZ7-SPEC'in çıkış koşulu ("Dal + PR, üç OS CI yeşil olmadan merge yok") bu yüzden
+   karşılanmadı. `git tag -l` de boş — `v1.0.0` etiketi yok.
+6. `FAZ7-SPEC.md:62`'deki "index < 120s" sınırını gerçek `tests/run.sh:1173` sınırı olan
+   3600s ile uyumlu hale getir (J-7 sapması) — gerekçe (ölçülen 2150-2367s) zaten Bölüm 7
+   ve Bölüm 9'da var, ama spec dosyası hiç güncellenmedi.
+7. V1-DUZELTME uygula (`docs/V1-DUZELTME-SPEC.md`) — FAZ 10'un zorunlu ön koşulu; sözleşme
+   tablosunda hâlâ "bekliyor".
+
+**Sıradaki (v2 adayları, FAZ 8/9 kapanınca):** MCP paketi (§3), `search.awk`'ın akış
+tabanlı iki geçişli sürümü (bellek tavanı), `quipu index`'in toplu-boru hattına çevrilmesi
+(~2400 s'lik msys tavanının tek gerçek çözümü). v1 kapsamında açık kalan tek kalem:
+Codex canlı doğrulaması — iptal (2026-08-21, ChatGPT üyeliği yok), adaptör kodu repo'da kalır.
 
 ### Yazılmış sözleşmeler (2026-08-22) — ayrı oturumlarda yürütülür
 
 Her dosya kendi kendine yeterlidir (ön bilgi bölümü, yasak desenler, doğrulanmış
 `[kaynak: dosya:satır]` etiketleri, test numara bloğu). Sıra:
 
-| # | Dosya | Konu | Bağımlılık |
+| # | Dosya | Konu | Durum (2026-08-22) |
 |---|---|---|---|
-| 1 | `docs/V1-DUZELTME-SPEC.md` | `fold=` config'e sabitlenir (sessiz karışık indeks kapanır) + `SessionEnd` artımlı `index` koşar. T-88…T-95 | yok; `v1.0.0` etiketinden **önce** girmesi tercih edilir |
-| 2 | `docs/FAZ8-SPEC.md` | Yansıtıcı hafıza: oturum dosyasında modelin dolduracağı `quipu:reflect` bloğu, boşluk tespiti (`mtime` YOK), "hafıza yazmadan bitti" yakalayıcısı. T-96…T-108 | V1-DUZELTME tercihen önce |
-| 3 | `docs/FAZ9-SPEC.md` | Kurulum deneyimi: `docs/KURULUM.md` ajan runbook'u, `user=`/`companion=` kimliği, persona `%s` doldurma. T-110…T-120 | bağımsız, paralel yürüyebilir |
-| 4 | `docs/FAZ10-SPEC.md` | Obsidian sözleşmeleri: `index.tsv` 7 sütun (`status`/`type`), `search --tag/--status`, `links.tsv` + `quipu links`, durum alfabesi veri olur. T-130…T-142 | V1-DUZELTME **zorunlu** önce (şema değişiyor) |
+| 1 | `docs/V1-DUZELTME-SPEC.md` | `fold=` config'e sabitlenir (sessiz karışık indeks kapanır) + `SessionEnd` artımlı `index` koşar. T-88…T-95 | **bekliyor** — hâlâ uygulanmadı; FAZ8-SPEC bunu "tercihen önce" diyordu, atlanmış |
+| 2 | `docs/FAZ8-SPEC.md` | Yansıtıcı hafıza: oturum dosyasında modelin dolduracağı `quipu:reflect` bloğu, boşluk tespiti (`mtime` YOK), "hafıza yazmadan bitti" yakalayıcısı. T-96…T-108 | **kod+testler+`FAZ8-BULGULAR.md` yazıldı** (Dilim 0 çıkış koşulu karşılandı), **commit edilmedi**; suite hâlâ yeşil doğrulanmadı (T-120'nin kendi hatasıyla zaten FAIL veriyor) — bkz. Bölüm 6 |
+| 3 | `docs/FAZ9-SPEC.md` | Kurulum deneyimi: `docs/KURULUM.md` ajan runbook'u, `user=`/`companion=` kimliği, persona `%s` doldurma. T-110…T-120 | **kimlik dilimi (V-2…V-5) + V-1 runbook (`KURULUM.md`) yazıldı**, commit'siz diff'te; T-120 sondaki-boşluk hatasıyla FAIL veriyor + `capture` kelimesi konusunda spec ile test çelişkisi çözülmedi |
+| 4 | `docs/FAZ10-SPEC.md` | Obsidian sözleşmeleri: `index.tsv` 7 sütun (`status`/`type`), `search --tag/--status`, `links.tsv` + `quipu links`, durum alfabesi veri olur. T-130…T-142 | **bekliyor** — uygulamaya hiç başlanmadı; ön-ölçüm `docs/FAZ10-BULGULAR.md` yazıldı; V1-DUZELTME **zorunlu** önce (şema değişiyor) |
 
 Üçü de avenoxbeyin incelemesinden çıktı (2026-08-22): quipu motor, avenoxbeyin deneyim.
 Alınmayan kalemler açıkça kapsam dışı: mem0/harici semantik katman, `Last-Session.md`
 overwrite, macOS launcher, `python3`, `{{...}}` şablon motoru.
+
+### Tasarım kaydı (docs/) — 2026-08-22 üretilen yeni belgeler
+
+Bu turda yedi yeni belge `docs/` altına yazıldı (hepsi untracked, henüz commit edilmedi):
+
+| Belge | Satır | Ne işe yarar |
+|---|---|---|
+| `FAZ8-BULGULAR.md` | 194 | FAZ 8 Dilim 0 çıkış koşulu — artık karşılandı (bkz. Bölüm 6, FAZ 8) |
+| `FAZ9-BULGULAR.md` | 185 | FAZ 9 Dilim 0 bulguları (bkz. Bölüm 6, FAZ 9) |
+| `FAZ10-BULGULAR.md` | 277 | FAZ 10 uygulama öncesi ön-ölçüm — kod henüz yazılmadı |
+| `KURULUM.md` | 146 | FAZ 9 V-1 ajan runbook'u — kurulum akışını baştan sona anlatır (bkz. Bölüm 6, FAZ 9) |
+| `AVENOXBEYIN-KARSILASTIRMA.md` | 96 | **Sentez belgesi, sözleşme değil** — avenoxbeyin avantajları → quipu karşılığı eşlemesini tek yerde okunur hale getirir. Kaynak dört sözleşme `FAZ8-SPEC.md`/`FAZ9-SPEC.md`/`FAZ10-SPEC.md`/`V1-DUZELTME-SPEC.md`'dir; bir satır değiştiğinde doğru olan onlardır, bu belge değil |
+| `FAZ6-KONTROL.md` | 246 | FAZ 6 çıktı kontrol listesi + bu turda fiilen yapılan denetimin sonucu (bkz. Bölüm 6, FAZ 6) |
+| `FAZ7-KONTROL.md` | 336 | FAZ 7 çıktı kontrol listesi + denetim sonucu, J-7/J-10 kısmi bulgusu dahil (bkz. Bölüm 6, FAZ 7) |
+
+Bunların dışında orijinal 22 SPEC/BULGULAR/KONTROL/DUZELTME belgesi hâlâ git HEAD'de sağlam
+ama çalışma ağacında silinmiş durumda — bkz. Bölüm 9, Açık kalemler madde 8.
 
 ### Çalışmaya başlarken
 1. Bu dosyayı ve `FAZ0-BULGULAR.md`'yi oku (ölçüm ayrıntıları orada).
