@@ -3,12 +3,13 @@ usage_head=Usage: quipu COMMAND [options]
 usage_doctor=  doctor    check environment: tools, dialects, vault, agents
 usage_capture=  capture   append a tool-use event to activity.log (reads stdin)
 usage_index=  index     build/update .quipu/index.tsv (incremental)
-usage_search=  search    folded lexical + BM25 search over the index
+usage_search=  search    folded lexical + BM25 search over the index (--brief: 120-byte snippet)
 usage_init=  init      create .quipu/ and the AGENTS.md bridge block
 usage_context=  context   print session memory context for the agent
 err_unknown=unknown command:
 err_no_vault=no vault found (.quipu/ missing); run: quipu init
 err_missing_arg=missing required argument
+err_unknown_flag=unknown flag: %s
 # doctor
 doc_head=quipu doctor - environment check
 doc_ok=ok
@@ -35,6 +36,11 @@ doc_summary=summary: %d ok, %d warn, %d fail
 doc_layout_mismatch=layout/emoji.txt and layout/plain.txt slug sets differ
 doc_layout=layout
 doc_layout_missing=config has no layout= value (run: quipu init)
+doc_fold=fold profile
+doc_fold_missing=config has no fold= value (run: quipu init)
+doc_fold_unknown=config fold= names a profile with no fold/<value>.sed
+doc_identity=identity
+doc_identity_missing=config has no user=/companion= value (run: quipu init --user NAME --companion NAME)
 doc_companion_missing=companion.md missing (run: quipu init)
 doc_onedrive_vault=vault path contains OneDrive (emoji folder risk, PLAN 4.9)
 doc_hooks_installed=installed
@@ -55,13 +61,16 @@ init_layout=layout: %s
 init_companion=companion.md seeded
 err_layout_conflict=layout conflict: --plain was requested but config says emoji
 err_layout_unknown=unknown layout value in config
+# persona
+persona_default_companion=Companion
+persona_default_user=User
 # context
 ctx_activity=recent activity
 ctx_threads=threads
 ctx_index=index stats
 ctx_empty=no memory yet
 ctx_truncated=… (truncated)
-ctx_precompact=Context may be compacted: write your memory now — update Threads.md and append today's session summary to the %s folder.
+ctx_precompact=Context may be compacted: write your memory now — fill the reflection block in today's session file (%s) and update Threads.md.
 # remember
 usage_remember=  remember  write mechanical digest from activity.log (append-only)
 remember_ok=wrote: %s
@@ -73,17 +82,32 @@ digest_files=Touched files (top %d):
 # bridge
 bridge_run=Run: quipu context
 bridge_layout=Layout:
-bridge_companion=Companion persona: %s/companion.md
+bridge_companion=Companion persona: %s (%s/companion.md)
 bridge_append=Append-only: quipu never rewrites these files.
+bridge_reflect=Session end protocol: fill the reflection block in today's session file, update Threads.md, and append new lines to the vault folders. quipu never rewrites these texts.
 bridge_claude=See AGENTS.md for vault layout and rules.
 bridge_updated=AGENTS.md context block updated
 err_conflict=options are mutually exclusive
 # layout
 layout_inbox=capture point for quick, unprocessed notes
+layout_dump=unsorted dump inside the inbox
+layout_command=dashboard and daily entry point
 layout_projects=active work, one subfolder per project
 layout_knowledge=long-lived notes and references
+layout_arsenal=tools, scripts and reusable snippets
 layout_sessions=per-session memory (FAZ 3 SessionEnd)
 layout_companion=companion persona and identity
+layout_archive=finished or frozen material
+layout_templates=note templates; copy them, do not edit in place
 # threads
 threads_seed_title=# Threads
 threads_seed_note=Ongoing threads in this vault. Append new lines; quipu never rewrites this file.
+# reflect
+reflect_head_what=What changed in this session?
+reflect_head_where=Where did the work happen?
+reflect_head_threads=Threads touched or continued
+ctx_reflect_ask=Session end: fill the reflection block in %s (between the %s markers) with what changed, where, and which threads.
+ctx_reflect_missed=Missed reflection: the session of %s had %s events and its reflection block was never filled.
+# dashboard
+dashboard_seed_title=# Dashboard
+dashboard_seed_note=Entry point for this vault. Append links and today's focus; quipu never rewrites this file.

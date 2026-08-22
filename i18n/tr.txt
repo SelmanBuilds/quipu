@@ -3,12 +3,13 @@ usage_head=Kullanım: quipu KOMUT [seçenekler]
 usage_doctor=  doctor    ortamı denetle: araçlar, lehçeler, vault, ajanlar
 usage_capture=  capture   activity.log'a araç kullanım olayı ekle (stdin okur)
 usage_index=  index     .quipu/index.tsv üret/güncelle (artımlı)
-usage_search=  search    indeks üzerinde katlanmış sözcüksel + BM25 arama
+usage_search=  search    indeks üzerinde katlanmış sözcüksel + BM25 arama (--brief: 120 baytlık künye)
 usage_init=  init      .quipu/ ve AGENTS.md köprü bloğunu kur
 usage_context=  context   ajan için oturum hafızası bağlamını bas
 err_unknown=bilinmeyen komut:
 err_no_vault=vault bulunamadı (.quipu/ yok); çalıştır: quipu init
 err_missing_arg=zorunlu argüman eksik
+err_unknown_flag=bilinmeyen bayrak: %s
 # doctor
 doc_head=quipu doctor - ortam denetimi
 doc_ok=ok
@@ -35,6 +36,11 @@ doc_summary=özet: %d ok, %d uyarı, %d hata
 doc_layout_mismatch=layout/emoji.txt ve layout/plain.txt slug kümeleri farklı
 doc_layout=yerleşim
 doc_layout_missing=config'te layout= değeri yok (çalıştır: quipu init)
+doc_fold=katlama profili
+doc_fold_missing=config'te fold= değeri yok (çalıştır: quipu init)
+doc_fold_unknown=config'teki fold= değerinin fold/<değer>.sed karşılığı yok
+doc_identity=kimlik
+doc_identity_missing=config'te user=/companion= değeri yok (çalıştır: quipu init --user AD --companion AD)
 doc_companion_missing=companion.md yok (çalıştır: quipu init)
 doc_onedrive_vault=vault yolu OneDrive içeriyor (emoji klasör riski, plan 4.9)
 doc_hooks_installed=kurulu
@@ -55,13 +61,16 @@ init_layout=yerleşim: %s
 init_companion=companion.md tohumlandı
 err_layout_conflict=yerleşim çakışması: --plain istendi ama config emoji diyor
 err_layout_unknown=config'te tanınmayan yerleşim değeri
+# persona
+persona_default_companion=Companion
+persona_default_user=Kullanıcı
 # context
 ctx_activity=son etkinlik
 ctx_threads=konular
 ctx_index=indeks istatistiği
 ctx_empty=henüz hafıza yok
 ctx_truncated=… (kırpıldı)
-ctx_precompact=Bağlam sıkışabilir: hafızanı şimdi yaz — Threads.md'yi güncelle ve %s klasörüne bugünkü oturum özetini ekle.
+ctx_precompact=Bağlam sıkışabilir: hafızanı şimdi yaz — bugünkü oturum dosyasındaki (%s) yansıma bloğunu doldur ve Threads.md'yi güncelle.
 # remember
 usage_remember=  remember  activity.log'dan mekanik sindirim yaz (append-only)
 remember_ok=yazıldı: %s
@@ -73,17 +82,32 @@ digest_files=Dokunulan dosyalar (en çok %d):
 # bridge
 bridge_run=Çalıştır: quipu context
 bridge_layout=Yerleşim:
-bridge_companion=Companion personası: %s/companion.md
+bridge_companion=Companion personası: %s (%s/companion.md)
 bridge_append=Yalnızca ekleme: quipu bu dosyaları asla yeniden yazmaz.
+bridge_reflect=Oturum sonu protokolü: bugünkü oturum dosyasındaki yansıma bloğunu doldur, Threads.md'yi güncelle ve vault klasörlerine yeni satırlar ekle. quipu bu metinleri asla yeniden yazmaz.
 bridge_claude=Vault yerleşimi ve kurallar için AGENTS.md'ye bak.
 bridge_updated=AGENTS.md bağlam bloğu güncellendi
 err_conflict=seçenekler birbirini dışlıyor
 # layout
 layout_inbox=hızlı, işlenmemiş notların iniş noktası
+layout_dump=gelen kutusunun içinde ayıklanmamış döküm
+layout_command=panel ve günlük giriş noktası
 layout_projects=aktif iş, proje başına bir alt klasör
 layout_knowledge=kalıcı notlar ve referanslar
+layout_arsenal=araçlar, betikler ve yeniden kullanılabilir parçalar
 layout_sessions=oturum başına hafıza (FAZ 3 SessionEnd)
 layout_companion=companion personası ve kimlik
+layout_archive=bitmiş ya da donmuş malzeme
+layout_templates=not şablonları; kopyala, yerinde düzenleme
 # threads
 threads_seed_title=# Konular
 threads_seed_note=Bu vault'ta süren iş başlıkları. Yeni satır ekle; quipu bu dosyayı asla yeniden yazmaz.
+# reflect
+reflect_head_what=Bu oturumda ne değişti?
+reflect_head_where=İş nerede yapıldı?
+reflect_head_threads=Dokunulan ya da sürdürülen konular
+ctx_reflect_ask=Oturum sonu: %s içindeki yansıma bloğunu (%s işaretçileri arasına) doldur — ne değişti, nerede, hangi konular.
+ctx_reflect_missed=Kaçırılan yansıma: %s oturumunda %s olay vardı ve yansıma bloğu hiç doldurulmadı.
+# dashboard
+dashboard_seed_title=# Panel
+dashboard_seed_note=Bu vault'un giriş noktası. Bağlantıları ve günün odağını ekle; quipu bu dosyayı asla yeniden yazmaz.
